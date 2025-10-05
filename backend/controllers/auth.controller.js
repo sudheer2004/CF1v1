@@ -130,11 +130,49 @@ const googleCallback = async (req, res) => {
   try {
     const token = generateToken({ userId: req.user.id, email: req.user.email });
 
-    // Redirect to frontend with token
-    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
+    // Send HTML that posts token to opener window and closes popup
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Authentication Successful</title>
+        </head>
+        <body>
+          <h2>Authentication successful! Redirecting...</h2>
+          <script>
+            // Send token to parent window (if opened as popup)
+            if (window.opener) {
+              window.opener.postMessage({ 
+                type: 'GOOGLE_AUTH_SUCCESS', 
+                token: '${token}' 
+              }, '${process.env.FRONTEND_URL}');
+              window.close();
+            } else {
+              // Regular redirect if not popup
+              window.location.href = '${process.env.FRONTEND_URL}/dashboard?token=${token}';
+            }
+          </script>
+        </body>
+      </html>
+    `);
   } catch (error) {
     console.error('Google callback error:', error);
-    res.redirect(`${process.env.FRONTEND_URL}/auth/error`);
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Authentication Failed</title>
+        </head>
+        <body>
+          <h2>Authentication failed. Please try again.</h2>
+          <script>
+            setTimeout(() => {
+              window.location.href = '${process.env.FRONTEND_URL}/login';
+            }, 2000);
+          </script>
+        </body>
+      </html>
+    `);
   }
 };
 

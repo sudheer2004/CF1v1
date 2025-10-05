@@ -132,7 +132,7 @@ const completeMatch = async (matchId, winnerId, player1RatingChange, player2Rati
     where: { id: matchId },
   });
 
-  const match = await prisma.match.update({
+  const updatedMatch = await prisma.match.update({
     where: { id: matchId },
     data: {
       status: 'completed',
@@ -145,7 +145,7 @@ const completeMatch = async (matchId, winnerId, player1RatingChange, player2Rati
     },
   });
 
-  return match;
+  return updatedMatch;
 };
 
 // Get match history for user
