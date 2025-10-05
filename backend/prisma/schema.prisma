@@ -1,0 +1,122 @@
+// Prisma Schema for Codeforces Duel Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Model
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String?  // Null for Google OAuth users
+  username      String   @unique
+  cfHandle      String?  @unique // Codeforces handle
+  googleId      String?  @unique
+  rating        Int      @default(0)
+  wins          Int      @default(0)
+  losses        Int      @default(0)
+  draws         Int      @default(0)
+  totalMatches  Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  matchesAsPlayer1  Match[]  @relation("Player1Matches")
+  matchesAsPlayer2  Match[]  @relation("Player2Matches")
+  createdDuels      Duel[]   @relation("DuelCreator")
+  joinedDuels       Duel[]   @relation("DuelOpponent")
+  queueEntries      MatchmakingQueue[]
+}
+
+// Matchmaking Queue
+model MatchmakingQueue {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ratingMin   Int
+  ratingMax   Int
+  tags        String[] // Array of problem tags
+  duration    Int      // Match duration in minutes
+  status      String   @default("waiting") // waiting, matched, cancelled
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, createdAt])
+}
+
+// Duel (Friend Challenge)
+model Duel {
+  id          String   @id @default(uuid())
+  duelCode    String   @unique // 8-character code
+  creatorId   String
+  creator     User     @relation("DuelCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  opponentId  String?
+  opponent    User?    @relation("DuelOpponent", fields: [opponentId], references: [id], onDelete: Cascade)
+  
+  ratingMin   Int
+  ratingMax   Int
+  tags        String[]
+  duration    Int
+  
+  problemId   String?  // contestId-index (e.g., "1234-A")
+  problemName String?
+  problemRating Int?
+  
+  status      String   @default("waiting") // waiting, active, completed, cancelled
+  startTime   DateTime?
+  endTime     DateTime?
+  winnerId    String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([duelCode])
+  @@index([status])
+}
+
+// Match (Active Match)
+model Match {
+  id          String   @id @default(uuid())
+  
+  player1Id   String
+  player1     User     @relation("Player1Matches", fields: [player1Id], references: [id], onDelete: Cascade)
+  
+  player2Id   String
+  player2     User     @relation("Player2Matches", fields: [player2Id], references: [id], onDelete: Cascade)
+  
+  problemId   String   // contestId-index
+  problemName String
+  problemRating Int?
+  problemTags String[]
+  
+  duration    Int      // in minutes
+  status      String   @default("active") // active, completed
+  
+  startTime   DateTime @default(now())
+  endTime     DateTime?
+  
+  winnerId    String?  // null = draw
+  
+  player1Submissions Json[] @default([]) // Array of submission objects
+  player2Submissions Json[] @default([]) // Array of submission objects
+  
+  player1RatingBefore Int
+  player1RatingAfter  Int?
+  player1RatingChange Int?
+  
+  player2RatingBefore Int
+  player2RatingAfter  Int?
+  player2RatingChange Int?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([player1Id, createdAt])
+  @@index([player2Id, createdAt])
+}
