@@ -11,6 +11,36 @@ const { formatProblemId, parseProblemId, getCodeforcesUrl } = require('../utils/
 // Store active polling intervals
 const activePolls = new Map();
 
+// Helper function to determine problem tags based on user selections
+const determineProblemTags = (tags1, tags2) => {
+  const hasTags1 = tags1 && tags1.length > 0;
+  const hasTags2 = tags2 && tags2.length > 0;
+
+  // Both have no tags → random problem (empty tags)
+  if (!hasTags1 && !hasTags2) {
+    return [];
+  }
+
+  // Only one has tags → use their tags
+  if (hasTags1 && !hasTags2) {
+    return tags1;
+  }
+  if (!hasTags1 && hasTags2) {
+    return tags2;
+  }
+
+  // Both have tags → check for overlap
+  const commonTags = tags1.filter(tag => tags2.includes(tag));
+  
+  // Has overlap → use common tags
+  if (commonTags.length > 0) {
+    return commonTags;
+  }
+
+  // No overlap → random problem (empty tags)
+  return [];
+};
+
 const initializeSocket = (io) => {
   io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
@@ -59,25 +89,29 @@ const initializeSocket = (io) => {
           await matchmakingService.removeFromQueue(socket.userId);
           await matchmakingService.removeFromQueue(match.userId);
 
-          // Calculate overlapping rating range and common tags
+          // Calculate overlapping rating range
           const overlapMin = Math.max(queueEntry.ratingMin, match.ratingMin);
           const overlapMax = Math.min(queueEntry.ratingMax, match.ratingMax);
-          const commonTags = queueEntry.tags.filter(tag => match.tags.includes(tag));
 
-          // Select random problem
+          // Determine problem tags based on both users' selections
+          const problemTags = determineProblemTags(queueEntry.tags, match.tags);
+
+          // Select problem with determined tags
           const problem = await codeforcesService.selectRandomProblem(
             overlapMin,
             overlapMax,
-            commonTags
+            problemTags
           );
 
+          // Use MAX duration of both users
+          const matchDuration = Math.max(queueEntry.duration, match.duration);
+
           // Create match in database
-          const avgDuration = Math.round((queueEntry.duration + match.duration) / 2);
           const createdMatch = await matchService.createMatch(
             socket.userId,
             match.userId,
             problem,
-            avgDuration
+            matchDuration
           );
 
           const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
@@ -164,7 +198,7 @@ const initializeSocket = (io) => {
         // Notify creator
         io.to(`duel-${duelCode}`).emit('opponent-joined', { duel });
 
-        // Select problem and start match
+        // Select problem - use duel creator's tags
         const problem = await codeforcesService.selectRandomProblem(
           duel.ratingMin,
           duel.ratingMax,
@@ -179,7 +213,7 @@ const initializeSocket = (io) => {
           problem.rating
         );
 
-        // Create match
+        // Create match - use duel duration directly
         const createdMatch = await matchService.createMatch(
           duel.creatorId,
           socket.userId,

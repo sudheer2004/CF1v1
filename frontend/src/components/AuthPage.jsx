@@ -14,7 +14,8 @@ export default function AuthPage({ setUser, setView }) {
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
     setError('');
   };
 
@@ -24,17 +25,14 @@ export default function AuthPage({ setUser, setView }) {
     setLoading(true);
 
     try {
-      let response;
-      if (mode === 'login') {
-        response = await api.login(formData.email, formData.password);
-      } else {
-        response = await api.signup(
-          formData.email,
-          formData.password,
-          formData.username,
-          formData.cfHandle || null
-        );
-      }
+      const response = mode === 'login'
+        ? await api.login(formData.email, formData.password)
+        : await api.signup(
+            formData.email,
+            formData.password,
+            formData.username,
+            formData.cfHandle || null
+          );
 
       localStorage.setItem('token', response.data.token);
       setUser(response.data.user);
@@ -50,14 +48,19 @@ export default function AuthPage({ setUser, setView }) {
     window.location.href = `${import.meta.env.VITE_API_URL}/auth/google`;
   };
 
+  const toggleMode = (newMode) => {
+    setMode(newMode);
+    setError('');
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900">
       <div className="max-w-md w-full">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center space-x-3 mb-4">
-            <Code className="w-12 h-12 text-purple-400" />
-            <Swords className="w-12 h-12 text-purple-400" />
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <Code className="size-12 text-purple-400" />
+            <Swords className="size-12 text-purple-400" />
           </div>
           <h1 className="text-4xl font-bold text-white mb-2">
             Codeforces Duel
@@ -68,12 +71,12 @@ export default function AuthPage({ setUser, setView }) {
         </div>
 
         {/* Auth Form */}
-        <div className="bg-gray-800/50 backdrop-blur-lg rounded-lg p-8 border border-purple-500/20">
+        <div className="bg-gray-800/50 backdrop-blur-lg rounded-lg p-8 border border-purple-500/20 shadow-2xl">
           {/* Toggle */}
-          <div className="flex space-x-2 mb-6">
+          <div className="flex gap-2 mb-6">
             <button
-              onClick={() => setMode('login')}
-              className={`flex-1 py-2 px-4 rounded-lg font-medium transition ${
+              onClick={() => toggleMode('login')}
+              className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
                 mode === 'login'
                   ? 'bg-purple-600 text-white'
                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
@@ -82,8 +85,8 @@ export default function AuthPage({ setUser, setView }) {
               Login
             </button>
             <button
-              onClick={() => setMode('signup')}
-              className={`flex-1 py-2 px-4 rounded-lg font-medium transition ${
+              onClick={() => toggleMode('signup')}
+              className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
                 mode === 'signup'
                   ? 'bg-purple-600 text-white'
                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
@@ -94,8 +97,8 @@ export default function AuthPage({ setUser, setView }) {
           </div>
 
           {error && (
-            <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg flex items-start space-x-2">
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg flex items-start gap-2">
+              <AlertCircle className="size-5 text-red-400 shrink-0 mt-0.5" />
               <p className="text-red-300 text-sm">{error}</p>
             </div>
           )}
@@ -112,14 +115,14 @@ export default function AuthPage({ setUser, setView }) {
                   value={formData.username}
                   onChange={handleChange}
                   required
-                  className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                  className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
                   placeholder="Enter your username"
                 />
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className=" block text-sm font-medium text-gray-300 mb-2">
                 Email
               </label>
               <input
@@ -128,7 +131,7 @@ export default function AuthPage({ setUser, setView }) {
                 value={formData.email}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
                 placeholder="Enter your email"
               />
             </div>
@@ -143,7 +146,7 @@ export default function AuthPage({ setUser, setView }) {
                 value={formData.password}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
                 placeholder="Enter your password"
               />
             </div>
@@ -158,7 +161,7 @@ export default function AuthPage({ setUser, setView }) {
                   name="cfHandle"
                   value={formData.cfHandle}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                  className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
                   placeholder="Your CF handle"
                 />
               </div>
@@ -167,7 +170,7 @@ export default function AuthPage({ setUser, setView }) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-lg transition disabled:opacity-50"
+              className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:cursor-not-allowed"
             >
               {loading ? 'Processing...' : mode === 'login' ? 'Login' : 'Sign Up'}
             </button>
@@ -185,9 +188,9 @@ export default function AuthPage({ setUser, setView }) {
 
             <button
               onClick={handleGoogleLogin}
-              className="mt-4 w-full flex items-center justify-center space-x-2 bg-white hover:bg-gray-100 text-gray-900 font-medium py-2 px-4 rounded-lg transition"
+              className="mt-4 w-full flex items-center justify-center gap-2 bg-white hover:bg-gray-100 text-gray-900 font-medium py-2 px-4 rounded-lg transition-colors"
             >
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
+              <svg className="size-5" viewBox="0 0 24 24">
                 <path
                   fill="currentColor"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"

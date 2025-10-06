@@ -1,5 +1,4 @@
 const prisma = require('../config/database.config');
-const { hasCommonElement } = require('../utils/helpers.util');
 
 // Add user to matchmaking queue
 const addToQueue = async (userId, ratingMin, ratingMax, tags, duration) => {
@@ -67,21 +66,21 @@ const findMatch = async (queueEntry) => {
 
   // Find compatible match
   for (const otherUser of waitingUsers) {
-    // Check rating overlap
+    // Check rating overlap (MANDATORY)
     const ratingOverlap = 
       ratingMax >= otherUser.ratingMin &&
       ratingMin <= otherUser.ratingMax;
 
-    // Check common tags (at least 1)
-    const hasCommonTags = hasCommonElement(tags, otherUser.tags);
-
-    // Check duration match (±5 minutes tolerance)
-    const durationMatch = Math.abs(duration - otherUser.duration) <= 5;
-
-    if (ratingOverlap && hasCommonTags && durationMatch) {
-      // Match found!
-      return otherUser;
+    // Skip if no rating overlap
+    if (!ratingOverlap) {
+      continue;
     }
+
+    // Tags are now optional - any combination works
+    // No need to check tags for matching
+
+    // Match found!
+    return otherUser;
   }
 
   return null;

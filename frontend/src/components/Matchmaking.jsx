@@ -6,6 +6,7 @@ import socketService from '../services/socket.service';
 export default function Matchmaking({ user, socket }) {
   const [inQueue, setInQueue] = useState(false);
   const [matchFound, setMatchFound] = useState(null);
+  const [isJoining, setIsJoining] = useState(false);
   const [formData, setFormData] = useState({
     ratingMin: 800,
     ratingMax: 1600,
@@ -14,12 +15,14 @@ export default function Matchmaking({ user, socket }) {
   });
   const [queueTime, setQueueTime] = useState(0);
   const [error, setError] = useState('');
+  const [isJoiningQueue, setIsJoiningQueue] = useState(false);
 
   useEffect(() => {
     if (!socket) return;
 
     socketService.on('queue-joined', () => {
       setInQueue(true);
+      setIsJoiningQueue(false);
       setError('');
     });
 
@@ -31,6 +34,7 @@ export default function Matchmaking({ user, socket }) {
     socketService.on('error', (err) => {
       setError(err.message);
       setInQueue(false);
+      setIsJoiningQueue(false);
     });
 
     return () => {
@@ -58,11 +62,22 @@ export default function Matchmaking({ user, socket }) {
       return;
     }
 
-    if (formData.tags.length === 0) {
-      setError('Please select at least one problem tag');
+    if (formData.ratingMin < 800) {
+      setError('Minimum rating must be at least 800');
       return;
     }
 
+    if (formData.ratingMax > 3500) {
+      setError('Maximum rating must be at most 3500');
+      return;
+    }
+
+    if (formData.ratingMin > formData.ratingMax) {
+      setError('Minimum rating cannot be greater than maximum rating');
+      return;
+    }
+
+    setIsJoiningQueue(true);
     socketService.joinMatchmaking(formData);
   };
 
@@ -230,7 +245,7 @@ export default function Matchmaking({ user, socket }) {
         {/* Tags */}
         <div className="mb-8">
           <label className="block text-white font-medium mb-3">
-            Problem Tags ({formData.tags.length} selected)
+            Problem Tags ({formData.tags.length} selected) - Optional
           </label>
           <div className="flex flex-wrap gap-2">
             {PROBLEM_TAGS.map((tag) => (
@@ -251,10 +266,17 @@ export default function Matchmaking({ user, socket }) {
 
         <button
           onClick={handleJoinQueue}
-          disabled={!user.cfHandle || formData.tags.length === 0}
-          className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition"
+          disabled={!user.cfHandle || isJoiningQueue}
+          className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition flex items-center justify-center space-x-2"
         >
-          {!user.cfHandle ? 'Add CF Handle First' : 'Join Queue'}
+          {isJoiningQueue ? (
+            <>
+              <Loader className="w-5 h-5 animate-spin" />
+              <span>Joining Queue...</span>
+            </>
+          ) : (
+            <span>{!user.cfHandle ? 'Add CF Handle First' : 'Join Queue'}</span>
+          )}
         </button>
       </div>
     </div>
