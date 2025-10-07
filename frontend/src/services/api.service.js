@@ -106,6 +106,19 @@ class ApiService {
     });
   }
 
+  // Match endpoints
+  async getActiveMatch() {
+    return this.call('/matches/active');
+  }
+
+  async getMatch(matchId) {
+    return this.call(`/matches/${matchId}`);
+  }
+
+  async getMatchHistoryForUser() {
+    return this.call('/matches/history');
+  }
+
   // Leaderboard endpoints
   async getLeaderboard(limit = 100, offset = 0) {
     return this.call(`/leaderboard?limit=${limit}&offset=${offset}`);

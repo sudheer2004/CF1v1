@@ -13,6 +13,7 @@ const matchmakingRoutes = require('./routes/matchmaking.routes');
 const duelRoutes = require('./routes/duel.routes');
 const profileRoutes = require('./routes/profile.routes');
 const leaderboardRoutes = require('./routes/leaderboard.routes');
+const matchRoutes = require('./routes/match.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -50,6 +51,7 @@ app.use('/api/matchmaking', matchmakingRoutes);
 app.use('/api/duel', duelRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/matches', matchRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

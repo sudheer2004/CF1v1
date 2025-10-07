@@ -28,6 +28,7 @@ model User {
   // Relations
   matchesAsPlayer1  Match[]  @relation("Player1Matches")
   matchesAsPlayer2  Match[]  @relation("Player2Matches")
+  wonMatches        Match[]  @relation("WonMatches")
   createdDuels      Duel[]   @relation("DuelCreator")
   joinedDuels       Duel[]   @relation("DuelOpponent")
   queueEntries      MatchmakingQueue[]
@@ -101,6 +102,7 @@ model Match {
   endTime     DateTime?
   
   winnerId    String?  // null = draw
+  winner      User?    @relation("WonMatches", fields: [winnerId], references: [id])
   
   player1Submissions Json[] @default([]) // Array of submission objects
   player2Submissions Json[] @default([]) // Array of submission objects
@@ -113,6 +115,9 @@ model Match {
   player2RatingAfter  Int?
   player2RatingChange Int?
   
+  player1Attempts     Int      @default(0)  // Number of attempts by player 1
+  player2Attempts     Int      @default(0)  // Number of attempts by player 2
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
