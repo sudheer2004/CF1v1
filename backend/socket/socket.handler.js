@@ -7,6 +7,7 @@ const ratingService = require('../services/rating.service');
 const userService = require('../services/user.service');
 const { verifyToken } = require('../utils/jwt.util');
 const { formatProblemId, parseProblemId, getCodeforcesUrl } = require('../utils/helpers.util');
+const prisma = require('../config/database.config');
 
 // Store active polling intervals
 const activePolls = new Map();
@@ -61,6 +62,49 @@ const stopPolling = (matchId) => {
   }
 };
 
+// Helper to check if user has active match
+const checkActiveMatch = async (userId) => {
+  const activeMatch = await prisma.match.findFirst({
+    where: {
+      status: 'active',
+      OR: [
+        { player1Id: userId },
+        { player2Id: userId }
+      ]
+    }
+  });
+  return activeMatch;
+};
+
+// Helper to cancel existing active match
+const cancelExistingMatch = async (io, userId) => {
+  const existingMatch = await checkActiveMatch(userId);
+  
+  if (existingMatch) {
+    console.log('⚠️ Cancelling existing active match for user:', userId);
+    console.log('   Existing Match ID:', existingMatch.id);
+    
+    // Stop polling
+    stopPolling(existingMatch.id);
+    
+    // Fetch full match details
+    const fullMatch = await prisma.match.findUnique({
+      where: { id: existingMatch.id },
+      include: {
+        player1: { select: { id: true, username: true, cfHandle: true, rating: true } },
+        player2: { select: { id: true, username: true, cfHandle: true, rating: true } },
+      },
+    });
+    
+    // End as draw (no rating change for abandoned match)
+    await handleMatchEnd(io, fullMatch, null);
+    
+    return true;
+  }
+  
+  return false;
+};
+
 const initializeSocket = (io) => {
   io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
@@ -77,6 +121,7 @@ const initializeSocket = (io) => {
         // Join user's personal room for targeted events
         socket.join(`user-${decoded.userId}`);
         
+        console.log('✅ User authenticated:', decoded.userId);
         socket.emit('authenticated', { userId: decoded.userId });
         
         try {
@@ -95,7 +140,17 @@ const initializeSocket = (io) => {
             } else {
               // Resume polling for this match
               console.log('▶️ Resuming polling for active match:', activeMatch.id);
-              startSubmissionPolling(io, activeMatch);
+              
+              // Fetch full match data with player details
+              const fullMatch = await prisma.match.findUnique({
+                where: { id: activeMatch.id },
+                include: {
+                  player1: { select: { id: true, username: true, cfHandle: true, rating: true } },
+                  player2: { select: { id: true, username: true, cfHandle: true, rating: true } },
+                },
+              });
+              
+              startSubmissionPolling(io, fullMatch);
               
               const opponentId = activeMatch.player1Id === decoded.userId 
                 ? activeMatch.player2Id 
@@ -121,6 +176,7 @@ const initializeSocket = (io) => {
           console.error('Error restoring active match:', matchError);
         }
       } catch (error) {
+        console.error('Authentication error:', error);
         socket.emit('error', { message: 'Authentication failed' });
       }
     });
@@ -129,6 +185,13 @@ const initializeSocket = (io) => {
       try {
         if (!socket.userId) {
           socket.emit('error', { message: 'Not authenticated' });
+          return;
+        }
+
+        // CHECK: User already has active match
+        const existingMatch = await checkActiveMatch(socket.userId);
+        if (existingMatch) {
+          socket.emit('error', { message: 'You already have an active match. Please complete it first.' });
           return;
         }
 
@@ -147,6 +210,18 @@ const initializeSocket = (io) => {
         const match = await matchmakingService.findMatch(queueEntry);
 
         if (match) {
+          // Double-check both users don't have active matches
+          const user1ActiveMatch = await checkActiveMatch(socket.userId);
+          const user2ActiveMatch = await checkActiveMatch(match.userId);
+          
+          if (user1ActiveMatch || user2ActiveMatch) {
+            console.log('⚠️ One or both users have active matches, cancelling matchmaking');
+            await matchmakingService.removeFromQueue(socket.userId);
+            await matchmakingService.removeFromQueue(match.userId);
+            socket.emit('error', { message: 'Match cancelled - one player has an active match' });
+            return;
+          }
+
           await matchmakingService.removeFromQueue(socket.userId);
           await matchmakingService.removeFromQueue(match.userId);
 
@@ -170,6 +245,15 @@ const initializeSocket = (io) => {
             matchDuration
           );
 
+          // Fetch full match with player details for polling
+          const fullMatch = await prisma.match.findUnique({
+            where: { id: createdMatch.id },
+            include: {
+              player1: { select: { id: true, username: true, cfHandle: true, rating: true } },
+              player2: { select: { id: true, username: true, cfHandle: true, rating: true } },
+            },
+          });
+
           const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
 
           socket.emit('match-found', {
@@ -190,11 +274,12 @@ const initializeSocket = (io) => {
             });
           }
 
-          // Start polling with logging
+          // Start polling with full match data
           console.log('\n🎮 MATCHMAKING: Match created, starting polling...');
           console.log('   Match ID:', createdMatch.id);
-          console.log('   Status:', createdMatch.status);
-          startSubmissionPolling(io, createdMatch);
+          console.log('   Player 1 CF:', fullMatch.player1.cfHandle);
+          console.log('   Player 2 CF:', fullMatch.player2.cfHandle);
+          startSubmissionPolling(io, fullMatch);
           console.log('✅ Polling started for match:', createdMatch.id, '\n');
         }
       } catch (error) {
@@ -221,17 +306,28 @@ const initializeSocket = (io) => {
           return;
         }
 
+        // CHECK: User already has active match
+        const existingMatch = await checkActiveMatch(socket.userId);
+        if (existingMatch) {
+          socket.emit('error', { message: 'You already have an active match. Please complete it first.' });
+          return;
+        }
+
         const { ratingMin, ratingMax, tags, duration } = data;
 
         const duel = await duelService.createDuel(
           socket.userId,
           ratingMin,
           ratingMax,
-          tags,
+          tags || [], // Handle empty tags
           duration
         );
 
         socket.join(`duel-${duel.duelCode}`);
+        
+        console.log('✅ Duel created:', duel.duelCode);
+        
+        // Emit ONCE with complete data
         socket.emit('duel-created', { duel });
       } catch (error) {
         console.error('Create duel error:', error);
@@ -246,11 +342,25 @@ const initializeSocket = (io) => {
           return;
         }
 
+        // CHECK: User already has active match
+        const existingMatch = await checkActiveMatch(socket.userId);
+        if (existingMatch) {
+          socket.emit('error', { message: 'You already have an active match. Please complete it first.' });
+          return;
+        }
+
         const duel = await duelService.joinDuel(duelCode, socket.userId);
+
+        // Also check if duel creator has active match
+        const creatorActiveMatch = await checkActiveMatch(duel.creatorId);
+        if (creatorActiveMatch) {
+          socket.emit('error', { message: 'Duel creator has an active match. Please wait.' });
+          return;
+        }
 
         socket.join(`duel-${duelCode}`);
 
-        io.to(`duel-${duelCode}`).emit('opponent-joined', { duel });
+        console.log('✅ Player joined duel:', duelCode);
 
         const problem = await codeforcesService.selectRandomProblem(
           duel.ratingMin,
@@ -272,18 +382,56 @@ const initializeSocket = (io) => {
           duel.duration
         );
 
-        const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
-
-        io.to(`duel-${duelCode}`).emit('match-start', {
-          match: createdMatch,
-          problemUrl,
+        // Fetch full match with player details for polling
+        const fullMatch = await prisma.match.findUnique({
+          where: { id: createdMatch.id },
+          include: {
+            player1: { select: { id: true, username: true, cfHandle: true, rating: true } },
+            player2: { select: { id: true, username: true, cfHandle: true, rating: true } },
+          },
         });
 
-        // Start polling with logging
+        const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
+
+        // Get both players' info
+        const creator = await userService.findUserById(duel.creatorId);
+        const joiner = await userService.findUserById(socket.userId);
+
+        // Emit to both players with their respective opponent info
+        const creatorSocket = Array.from(io.sockets.sockets.values()).find(
+          s => s.userId === duel.creatorId
+        );
+
+        if (creatorSocket) {
+          creatorSocket.emit('match-found', {
+            match: createdMatch,
+            problemUrl,
+            opponent: {
+              id: joiner.id,
+              username: joiner.username,
+              cfHandle: joiner.cfHandle,
+              rating: joiner.rating,
+            },
+          });
+        }
+
+        socket.emit('match-found', {
+          match: createdMatch,
+          problemUrl,
+          opponent: {
+            id: creator.id,
+            username: creator.username,
+            cfHandle: creator.cfHandle,
+            rating: creator.rating,
+          },
+        });
+
+        // Start polling with full match data
         console.log('\n⚔️ DUEL: Match created, starting polling...');
         console.log('   Match ID:', createdMatch.id);
-        console.log('   Status:', createdMatch.status);
-        startSubmissionPolling(io, createdMatch);
+        console.log('   Player 1 CF:', fullMatch.player1.cfHandle);
+        console.log('   Player 2 CF:', fullMatch.player2.cfHandle);
+        startSubmissionPolling(io, fullMatch);
         console.log('✅ Polling started for duel match:', createdMatch.id, '\n');
       } catch (error) {
         console.error('Join duel error:', error);
@@ -300,7 +448,13 @@ const initializeSocket = (io) => {
         }
 
         const { matchId } = data;
-        const match = await matchService.getMatchById(matchId);
+        const match = await prisma.match.findUnique({
+          where: { id: matchId },
+          include: {
+            player1: { select: { id: true, username: true, cfHandle: true, rating: true } },
+            player2: { select: { id: true, username: true, cfHandle: true, rating: true } },
+          },
+        });
 
         if (!match) {
           socket.emit('error', { message: 'Match not found' });
@@ -384,8 +538,17 @@ const initializeSocket = (io) => {
           // Stop polling
           stopPolling(matchId);
 
+          // Fetch full match
+          const fullMatch = await prisma.match.findUnique({
+            where: { id: matchId },
+            include: {
+              player1: { select: { id: true, username: true, cfHandle: true, rating: true } },
+              player2: { select: { id: true, username: true, cfHandle: true, rating: true } },
+            },
+          });
+
           // End match as draw
-          await handleMatchEnd(io, match, null);
+          await handleMatchEnd(io, fullMatch, null);
         }
       } catch (error) {
         console.error('Offer draw error:', error);
@@ -402,7 +565,13 @@ const initializeSocket = (io) => {
         }
 
         const { matchId } = data;
-        const match = await matchService.getMatchById(matchId);
+        const match = await prisma.match.findUnique({
+          where: { id: matchId },
+          include: {
+            player1: { select: { id: true, username: true, cfHandle: true, rating: true } },
+            player2: { select: { id: true, username: true, cfHandle: true, rating: true } },
+          },
+        });
 
         if (!match) {
           socket.emit('error', { message: 'Match not found' });
@@ -468,7 +637,6 @@ const initializeSocket = (io) => {
   setInterval(async () => {
     try {
       console.log('🔍 Checking for expired matches...');
-      const prisma = require('../config/database.config');
       
       const activeMatches = await prisma.match.findMany({
         where: { status: 'active' },
@@ -533,7 +701,15 @@ const startSubmissionPolling = (io, match) => {
   console.log('Creating interval...');
   const intervalId = setInterval(async () => {
     try {
-      const currentMatch = await matchService.getMatchById(match.id);
+      console.log('\n🔄 POLLING TICK - Match:', match.id.substring(0, 8));
+      
+      const currentMatch = await prisma.match.findUnique({
+        where: { id: match.id },
+        include: {
+          player1: { select: { id: true, username: true, cfHandle: true, rating: true } },
+          player2: { select: { id: true, username: true, cfHandle: true, rating: true } },
+        },
+      });
 
       if (!currentMatch) {
         console.log('❌ Match not found in database');
@@ -542,7 +718,7 @@ const startSubmissionPolling = (io, match) => {
       }
 
       if (currentMatch.status !== 'active') {
-        console.log('⏹️ Match no longer active, stopping poll');
+        console.log('⏹️ Match no longer active (status:', currentMatch.status, '), stopping poll');
         stopPolling(match.id);
         return;
       }
@@ -556,14 +732,30 @@ const startSubmissionPolling = (io, match) => {
         return;
       }
 
-      console.log('🔍 Polling submissions for match:', match.id.substring(0, 8));
+      console.log('📡 Polling submissions...');
+      console.log('   Player 1:', currentMatch.player1.cfHandle);
+      console.log('   Player 2:', currentMatch.player2.cfHandle);
+      console.log('   Problem:', currentMatch.problemId);
+      
       const results = await submissionService.pollMatchSubmissions(currentMatch);
+
+      console.log('📊 Poll Results:');
+      console.log('   Player 1 - Attempts:', results.player1?.attempts || 0, 'Solved:', results.player1?.solved || false);
+      console.log('   Player 2 - Attempts:', results.player2?.attempts || 0, 'Solved:', results.player2?.solved || false);
 
       await matchService.updateMatchAttempts(
         currentMatch.id,
         results.player1?.attempts || 0,
         results.player2?.attempts || 0
       );
+
+      // Emit updates to clients
+      const updateEvent = `match-update-${match.id}`;
+      io.emit(updateEvent, {
+        player1Attempts: results.player1?.attempts || 0,
+        player2Attempts: results.player2?.attempts || 0,
+      });
+      console.log('📤 Emitted update:', updateEvent);
 
       if (results.player1?.solved || results.player2?.solved) {
         console.log('🎉 PROBLEM SOLVED!');
@@ -573,26 +765,21 @@ const startSubmissionPolling = (io, match) => {
           currentMatch.player1Id,
           currentMatch.player2Id
         );
-        console.log('Winner:', winnerId);
+        console.log('🏆 Winner:', winnerId);
 
         await handleMatchEnd(io, currentMatch, winnerId);
         stopPolling(match.id);
         return;
       }
-
-      // Emit updates to clients
-      const updateEvent = `match-update-${match.id}`;
-      io.emit(updateEvent, {
-        player1Attempts: results.player1?.attempts || 0,
-        player2Attempts: results.player2?.attempts || 0,
-      });
     } catch (error) {
-      console.error('POLL ERROR for match', match.id, ':', error.message);
+      console.error('❌ POLL ERROR for match', match.id, ':', error.message);
+      console.error('Stack:', error.stack);
     }
   }, pollInterval * 1000);
 
   activePolls.set(match.id, intervalId);
   console.log('✅ Interval created successfully');
+  console.log('   Interval ID:', intervalId);
   console.log('   Active Polls Count:', activePolls.size);
   console.log('═══════════════════════════════════════════\n');
 };

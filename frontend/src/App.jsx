@@ -26,6 +26,68 @@ export default function App() {
     checkAuth();
   }, []);
 
+  // Handle Google OAuth callback
+  useEffect(() => {
+    const handleOAuthCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token');
+      const authError = urlParams.get('error');
+
+      if (token) {
+        console.log('✅ Google OAuth token received');
+        
+        // Save token
+        localStorage.setItem('token', token);
+        
+        // Clean up URL immediately
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        // Fetch user data
+        try {
+          const response = await api.getCurrentUser();
+          setUser(response.data.user);
+          
+          // Check for active match
+          try {
+            const matchResponse = await api.getActiveMatch();
+            if (matchResponse.match && matchResponse.remainingTime > 0) {
+              console.log('✅ Restoring active match');
+              setActiveMatch({
+                match: matchResponse.match,
+                opponent: matchResponse.opponent,
+                problemUrl: matchResponse.problemUrl,
+                startTime: new Date(matchResponse.match.startedAt).getTime(),
+                matchDuration: matchResponse.match.duration * 60,
+              });
+              setMatchTimer(matchResponse.remainingTime);
+              setMatchAttempts(matchResponse.attempts);
+              setView('matchmaking');
+            } else {
+              setView('dashboard');
+            }
+          } catch (err) {
+            console.log('No active match found');
+            setView('dashboard');
+          }
+          
+          setLoading(false);
+        } catch (err) {
+          console.error('Failed to load user data:', err);
+          setError('Failed to load user data');
+          localStorage.removeItem('token');
+          setLoading(false);
+        }
+      } else if (authError) {
+        console.error('OAuth error:', authError);
+        setError('Authentication failed. Please try again.');
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setLoading(false);
+      }
+    };
+
+    handleOAuthCallback();
+  }, []);
+
   // Initialize socket connection when user is authenticated
   useEffect(() => {
     const initializeSocket = async () => {

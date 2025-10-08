@@ -45,6 +45,7 @@ export default function AuthPage({ setUser, setView }) {
   };
 
   const handleGoogleLogin = () => {
+    // Simple redirect - token will be handled in App.jsx
     window.location.href = `${import.meta.env.VITE_API_URL}/auth/google`;
   };
 
@@ -122,7 +123,7 @@ export default function AuthPage({ setUser, setView }) {
             )}
 
             <div>
-              <label className=" block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Email
               </label>
               <input

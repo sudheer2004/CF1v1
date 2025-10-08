@@ -125,54 +125,28 @@ const getCurrentUser = async (req, res) => {
   }
 };
 
-// Google OAuth callback (called by Passport)
+// Google OAuth callback (simplified redirect)
 const googleCallback = async (req, res) => {
   try {
+    // Check if user exists in req (set by Passport)
+    if (!req.user) {
+      console.error('No user data received from Google');
+      return res.redirect(`${process.env.FRONTEND_URL}?error=auth_failed`);
+    }
+
+    console.log('✅ Google auth successful for user:', req.user.email);
+
+    // Generate token
     const token = generateToken({ userId: req.user.id, email: req.user.email });
 
-    // Send HTML that posts token to opener window and closes popup
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Authentication Successful</title>
-        </head>
-        <body>
-          <h2>Authentication successful! Redirecting...</h2>
-          <script>
-            // Send token to parent window (if opened as popup)
-            if (window.opener) {
-              window.opener.postMessage({ 
-                type: 'GOOGLE_AUTH_SUCCESS', 
-                token: '${token}' 
-              }, '${process.env.FRONTEND_URL}');
-              window.close();
-            } else {
-              // Regular redirect if not popup
-              window.location.href = '${process.env.FRONTEND_URL}/dashboard?token=${token}';
-            }
-          </script>
-        </body>
-      </html>
-    `);
+    // Redirect to frontend with token in URL
+    const redirectUrl = `${process.env.FRONTEND_URL}?token=${token}`;
+    res.redirect(redirectUrl);
+    
   } catch (error) {
     console.error('Google callback error:', error);
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Authentication Failed</title>
-        </head>
-        <body>
-          <h2>Authentication failed. Please try again.</h2>
-          <script>
-            setTimeout(() => {
-              window.location.href = '${process.env.FRONTEND_URL}/login';
-            }, 2000);
-          </script>
-        </body>
-      </html>
-    `);
+    const errorUrl = `${process.env.FRONTEND_URL}?error=auth_failed`;
+    res.redirect(errorUrl);
   }
 };
 

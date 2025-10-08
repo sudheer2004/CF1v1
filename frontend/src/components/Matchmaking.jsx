@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Users, Loader, Clock, ExternalLink, AlertCircle, Trophy, Timer, CheckCircle, XCircle, Award } from 'lucide-react';
 import { PROBLEM_TAGS, DURATIONS } from '../utils/constants';
 import socketService from '../services/socket.service';
@@ -24,17 +24,25 @@ export default function Matchmaking({
   });
   const [showDrawNotification, setShowDrawNotification] = useState(false);
 
-  useEffect(() => {
-    if (!socket) return;
+  // Use ref to prevent duplicate event listeners
+  const listenersRegistered = useRef(false);
 
-    socketService.on('queue-joined', () => {
+  useEffect(() => {
+    if (!socket || listenersRegistered.current) return;
+
+    console.log('🎧 Setting up Matchmaking socket listeners');
+
+    const handleQueueJoined = () => {
       setInQueue(true);
       setIsJoiningQueue(false);
       setError('');
-    });
+    };
 
-    socketService.on('match-found', (data) => {
+    const handleMatchFound = (data) => {
+      console.log('🎮 Match found in matchmaking');
       setInQueue(false);
+      setIsJoiningQueue(false);
+      
       const matchDuration = data.match.duration * 60;
       setActiveMatch({
         ...data,
@@ -46,18 +54,27 @@ export default function Matchmaking({
       setMatchAttempts({ player1: 0, player2: 0 });
       setDrawOffered({ byMe: false, byOpponent: false });
       setShowDrawNotification(false);
-    });
+    };
 
-    socketService.on('error', (err) => {
+    const handleError = (err) => {
+      console.error('❌ Matchmaking error:', err.message);
       setError(err.message);
       setInQueue(false);
       setIsJoiningQueue(false);
-    });
+    };
+
+    socketService.on('queue-joined', handleQueueJoined);
+    socketService.on('match-found', handleMatchFound);
+    socketService.on('error', handleError);
+
+    listenersRegistered.current = true;
 
     return () => {
-      socketService.off('queue-joined');
-      socketService.off('match-found');
-      socketService.off('error');
+      console.log('🧹 Cleaning up Matchmaking socket listeners');
+      socketService.off('queue-joined', handleQueueJoined);
+      socketService.off('match-found', handleMatchFound);
+      socketService.off('error', handleError);
+      listenersRegistered.current = false;
     };
   }, [socket, setActiveMatch, setMatchResult, setMatchTimer, setMatchAttempts]);
 
@@ -112,9 +129,9 @@ export default function Matchmaking({
     socketService.on(`draw-offered-${matchId}`, handleDrawOffered);
 
     return () => {
-      socketService.off(`match-update-${matchId}`);
-      socketService.off(`match-end-${matchId}`);
-      socketService.off(`draw-offered-${matchId}`);
+      socketService.off(`match-update-${matchId}`, handleMatchUpdate);
+      socketService.off(`match-end-${matchId}`, handleMatchEnd);
+      socketService.off(`draw-offered-${matchId}`, handleDrawOffered);
     };
   }, [activeMatch, socket, user.id, setActiveMatch, setMatchResult, setMatchTimer, setMatchAttempts]);
 
@@ -191,6 +208,7 @@ export default function Matchmaking({
     }
 
     setIsJoiningQueue(true);
+    setError('');
     socketService.joinMatchmaking(formData);
   };
 
@@ -500,7 +518,8 @@ export default function Matchmaking({
                 min="800"
                 max="3500"
                 step="100"
-                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                disabled={isJoiningQueue}
+                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500 disabled:opacity-50"
               />
             </div>
             <div>
@@ -514,7 +533,8 @@ export default function Matchmaking({
                 min="800"
                 max="3500"
                 step="100"
-                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                disabled={isJoiningQueue}
+                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500 disabled:opacity-50"
               />
             </div>
           </div>
@@ -527,7 +547,8 @@ export default function Matchmaking({
               <button
                 key={dur.value}
                 onClick={() => setFormData({ ...formData, duration: dur.value })}
-                className={`px-4 py-2 rounded-lg transition ${
+                disabled={isJoiningQueue}
+                className={`px-4 py-2 rounded-lg transition disabled:opacity-50 ${
                   formData.duration === dur.value
                     ? 'bg-purple-600 text-white'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
@@ -548,7 +569,8 @@ export default function Matchmaking({
               <button
                 key={tag}
                 onClick={() => handleTagToggle(tag)}
-                className={`px-3 py-1.5 rounded-lg text-sm transition ${
+                disabled={isJoiningQueue}
+                className={`px-3 py-1.5 rounded-lg text-sm transition disabled:opacity-50 ${
                   formData.tags.includes(tag)
                     ? 'bg-purple-600 text-white'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
@@ -562,7 +584,7 @@ export default function Matchmaking({
 
         <button
           onClick={handleJoinQueue}
-          disabled={!user.cfHandle || isJoiningQueue}
+          disabled={!user.cfHandle || isJoiningQueue || activeMatch}
           className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition flex items-center justify-center space-x-2"
         >
           {isJoiningQueue ? (
@@ -570,6 +592,8 @@ export default function Matchmaking({
               <Loader className="w-5 h-5 animate-spin" />
               <span>Joining Queue...</span>
             </>
+          ) : activeMatch ? (
+            <span>Complete Current Match First</span>
           ) : (
             <span>{!user.cfHandle ? 'Add CF Handle First' : 'Join Queue'}</span>
           )}
