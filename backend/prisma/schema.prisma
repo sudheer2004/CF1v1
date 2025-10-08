@@ -125,3 +125,15 @@ model Match {
   @@index([player1Id, createdAt])
   @@index([player2Id, createdAt])
 }
+
+//user chat message schema
+model Message {
+  id          String   @id @default(uuid())
+  matchId     String
+  senderId    String
+  senderName  String
+  content     String
+  createdAt   DateTime @default(now())
+
+  @@index([matchId, createdAt])
+}

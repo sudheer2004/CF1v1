@@ -15,9 +15,8 @@ class SocketService {
 
     console.log('🔌 Connecting to socket server...');
     
-    // FIX: Remove /api from the Socket.IO URL
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-    const socketUrl = apiUrl.replace('/api', ''); // Remove /api suffix if present
+    const socketUrl = apiUrl.replace('/api', '');
     
     console.log('Socket URL:', socketUrl);
     
@@ -34,7 +33,6 @@ class SocketService {
     this.socket.on('connect', () => {
       console.log('✅ Socket connected:', this.socket.id);
       
-      // Re-authenticate on reconnection
       const token = localStorage.getItem('token');
       if (token && !this.authenticated) {
         console.log('🔐 Re-authenticating after reconnection...');
@@ -52,11 +50,27 @@ class SocketService {
       console.error('Full error:', error);
     });
 
-    this.socket.on('error', (error) => {
-      console.error('🔴 Socket error:', error);
+    // FIXED: Better error handling
+    this.socket.on('error', (errorData) => {
+      console.error('🔴 Socket error event received:', errorData);
+      
+      // Extract the message from various error formats
+      let errorMessage = 'An error occurred';
+      
+      if (typeof errorData === 'string') {
+        errorMessage = errorData;
+      } else if (errorData && typeof errorData === 'object') {
+        errorMessage = errorData.message || errorData.error || JSON.stringify(errorData);
+      }
+      
+      console.error('🔴 Processed error message:', errorMessage);
+      
+      // Dispatch as a custom window event so any component can listen
+      window.dispatchEvent(new CustomEvent('socket-error', { 
+        detail: { message: errorMessage, originalError: errorData } 
+      }));
     });
 
-    // Restore event handlers after reconnection
     this.socket.on('connect', () => {
       this.eventHandlers.forEach((handler, event) => {
         console.log('🔄 Re-registering event handler:', event);
@@ -70,7 +84,6 @@ class SocketService {
     if (!this.socket?.connected) {
       console.log('⚠️ Socket not connected, waiting for connection...');
       
-      // Wait for connection before authenticating
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Connection timeout'));
@@ -136,7 +149,6 @@ class SocketService {
       return;
     }
     
-    // Store handler for re-registration after reconnect
     this.eventHandlers.set(event, handler);
     this.socket.on(event, handler);
   }
@@ -200,6 +212,40 @@ class SocketService {
     this.emit('accept-draw', { matchId });
   }
 
+  // ==================== CHAT METHODS ====================
+  
+  getMatchMessages(matchId) {
+    console.log('📨 Getting messages for match:', matchId);
+    this.emit('get-match-messages', { matchId });
+  }
+
+  sendMessage(matchId, content) {
+    console.log('💬 Sending message:', { matchId, content });
+    this.emit('send-message', { matchId, content });
+  }
+
+  onNewMessage(matchId, handler) {
+    const event = `new-message-${matchId}`;
+    console.log('👂 Listening for new messages:', event);
+    this.on(event, handler);
+  }
+
+  offNewMessage(matchId, handler) {
+    const event = `new-message-${matchId}`;
+    console.log('🔇 Stopping message listener:', event);
+    this.off(event, handler);
+  }
+
+  onMessagesLoaded(handler) {
+    console.log('👂 Listening for messages loaded');
+    this.on('match-messages-loaded', handler);
+  }
+
+  offMessagesLoaded(handler) {
+    console.log('🔇 Stopping messages loaded listener');
+    this.off('match-messages-loaded', handler);
+  }
+
   getSocket() {
     return this.socket;
   }
@@ -213,7 +259,6 @@ class SocketService {
   }
 }
 
-// Create singleton instance
 const socketService = new SocketService();
 
 export default socketService;
