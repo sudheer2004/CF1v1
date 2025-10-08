@@ -65,6 +65,13 @@ const findUserByEmail = async (email) => {
   });
 };
 
+// Find user by username
+const findUserByUsername = async (username) => {
+  return prisma.user.findUnique({
+    where: { username },
+  });
+};
+
 // Find user by ID
 const findUserById = async (userId) => {
   return prisma.user.findUnique({
@@ -133,6 +140,7 @@ module.exports = {
   createUser,
   findOrCreateGoogleUser,
   findUserByEmail,
+  findUserByUsername, // Added this export
   findUserById,
   verifyPassword,
   updateCfHandle,

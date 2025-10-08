@@ -4,7 +4,7 @@ import socketService from '../services/socket.service';
 import useMatchManager from '../hooks/useMatchManager';
 import ActiveMatchView from './ActiveMatchView';
 import MatchResultView from './MatchResultView';
-import MatchSettingsForm from './MatchSettingsForm';
+import MatchSettingsForm, { isFormValid } from './MatchSettingsForm';
 
 export default function DuelMode({
   user, socket, activeMatch, setActiveMatch,
@@ -319,7 +319,7 @@ export default function DuelMode({
 
           <button
             onClick={handleCreateDuel}
-            disabled={!user.cfHandle || isCreatingDuel}
+            disabled={!user.cfHandle || !isFormValid(formData) || isCreatingDuel}
             className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-3 rounded-lg transition flex items-center justify-center space-x-2"
           >
             {isCreatingDuel ? (
@@ -327,6 +327,8 @@ export default function DuelMode({
                 <Loader className="w-5 h-5 animate-spin" />
                 <span>Creating Duel...</span>
               </>
+            ) : !isFormValid(formData) ? (
+              <span>Invalid Settings</span>
             ) : (
               <span>Create Duel</span>
             )}

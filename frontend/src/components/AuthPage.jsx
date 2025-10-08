@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Code, Swords, AlertCircle } from 'lucide-react';
 import api from '../services/api.service';
 
@@ -12,16 +12,131 @@ export default function AuthPage({ setUser, setView }) {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passwordErrors, setPasswordErrors] = useState({
+    length: false,
+    uppercase: false,
+    special: false,
+  });
+  const [usernameError, setUsernameError] = useState('');
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [checkingEmail, setCheckingEmail] = useState(false);
+
+  const usernameTimerRef = useRef(null);
+  const emailTimerRef = useRef(null);
+
+  const validatePassword = (password) => {
+    const errors = {
+      length: password.length < 8,
+      uppercase: !/[A-Z]/.test(password),
+      special: !/[^a-zA-Z]/.test(password),
+    };
+    setPasswordErrors(errors);
+    return !errors.length && !errors.uppercase && !errors.special;
+  };
+
+  const isValidEmail = (email) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
+  const checkEmailAvailability = async (email) => {
+    if (!email || !isValidEmail(email)) {
+      setEmailError('');
+      return;
+    }
+
+    setCheckingEmail(true);
+    try {
+      const response = await api.checkEmail(email);
+      if (response.exists) {
+        setEmailError('Email already registered');
+      } else {
+        setEmailError('');
+      }
+    } catch (err) {
+      console.error('Error checking email:', err);
+      setEmailError('');
+    } finally {
+      setCheckingEmail(false);
+    }
+  };
+
+  const checkUsernameAvailability = async (username) => {
+    if (!username || username.length < 3) {
+      setUsernameError('');
+      return;
+    }
+
+    setCheckingUsername(true);
+    try {
+      const response = await api.checkUsername(username);
+      if (response.exists) {
+        setUsernameError('Username already taken');
+      } else {
+        setUsernameError('');
+      }
+    } catch (err) {
+      console.error('Error checking username:', err);
+      setUsernameError('');
+    } finally {
+      setCheckingUsername(false);
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
     setError('');
+    
+    if (name === 'password' && mode === 'signup') {
+      validatePassword(value);
+    }
+    
+    if (name === 'email' && mode === 'signup') {
+      setEmailError('');
+      setCheckingEmail(false);
+      
+      if (emailTimerRef.current) {
+        clearTimeout(emailTimerRef.current);
+      }
+      
+      if (isValidEmail(value)) {
+        emailTimerRef.current = setTimeout(() => {
+          checkEmailAvailability(value);
+        }, 500);
+      }
+    }
+    
+    if (name === 'username' && mode === 'signup') {
+      setUsernameError('');
+      setCheckingUsername(false);
+      
+      if (usernameTimerRef.current) {
+        clearTimeout(usernameTimerRef.current);
+      }
+      
+      if (value.length >= 3) {
+        usernameTimerRef.current = setTimeout(() => {
+          checkUsernameAvailability(value);
+        }, 500);
+      }
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    
+    if (mode === 'signup' && !validatePassword(formData.password)) {
+      setError('Please fix the password requirements');
+      return;
+    }
+    
+    if (mode === 'signup' && (emailError || usernameError)) {
+      setError('Please fix the validation errors');
+      return;
+    }
+    
     setLoading(true);
 
     try {
@@ -45,19 +160,38 @@ export default function AuthPage({ setUser, setView }) {
   };
 
   const handleGoogleLogin = () => {
-    // Simple redirect - token will be handled in App.jsx
     window.location.href = `${import.meta.env.VITE_API_URL}/auth/google`;
   };
 
   const toggleMode = (newMode) => {
     setMode(newMode);
     setError('');
+    setPasswordErrors({ length: false, uppercase: false, special: false });
+    setUsernameError('');
+    setEmailError('');
+    setCheckingUsername(false);
+    setCheckingEmail(false);
+    
+    if (usernameTimerRef.current) clearTimeout(usernameTimerRef.current);
+    if (emailTimerRef.current) clearTimeout(emailTimerRef.current);
   };
+
+  const isPasswordValid = !passwordErrors.length && !passwordErrors.uppercase && !passwordErrors.special;
+  
+  const isSignupValid = mode === 'login' || (
+    formData.email &&
+    formData.password &&
+    formData.username &&
+    isPasswordValid &&
+    !emailError &&
+    !usernameError &&
+    !checkingEmail &&
+    !checkingUsername
+  );
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900">
       <div className="max-w-md w-full">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
             <Code className="size-12 text-purple-400" />
@@ -71,9 +205,7 @@ export default function AuthPage({ setUser, setView }) {
           </p>
         </div>
 
-        {/* Auth Form */}
         <div className="bg-gray-800/50 backdrop-blur-lg rounded-lg p-8 border border-purple-500/20 shadow-2xl">
-          {/* Toggle */}
           <div className="flex gap-2 mb-6">
             <button
               onClick={() => toggleMode('login')}
@@ -110,15 +242,29 @@ export default function AuthPage({ setUser, setView }) {
                 <label className="block text-sm font-medium text-gray-300 mb-2">
                   Username
                 </label>
-                <input
-                  type="text"
-                  name="username"
-                  value={formData.username}
-                  onChange={handleChange}
-                  required
-                  className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
-                  placeholder="Enter your username"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    name="username"
+                    value={formData.username}
+                    onChange={handleChange}
+                    required
+                    minLength={3}
+                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
+                    placeholder="Enter your username"
+                  />
+                  {checkingUsername && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                  )}
+                </div>
+                {usernameError && (
+                  <p className="text-red-400 text-xs mt-1">{usernameError}</p>
+                )}
+                {!usernameError && formData.username.length >= 3 && !checkingUsername && (
+                  <p className="text-green-400 text-xs mt-1">✓ Username available</p>
+                )}
               </div>
             )}
 
@@ -126,15 +272,28 @@ export default function AuthPage({ setUser, setView }) {
               <label className="block text-sm font-medium text-gray-300 mb-2">
                 Email
               </label>
-              <input
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                required
-                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
-                placeholder="Enter your email"
-              />
+              <div className="relative">
+                <input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  required
+                  className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
+                  placeholder="Enter your email"
+                />
+                {checkingEmail && mode === 'signup' && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                )}
+              </div>
+              {mode === 'signup' && emailError && (
+                <p className="text-red-400 text-xs mt-1">{emailError}</p>
+              )}
+              {mode === 'signup' && !emailError && isValidEmail(formData.email) && !checkingEmail && (
+                <p className="text-green-400 text-xs mt-1">✓ Email available</p>
+              )}
             </div>
 
             <div>
@@ -150,6 +309,29 @@ export default function AuthPage({ setUser, setView }) {
                 className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:border-purple-500 transition-colors"
                 placeholder="Enter your password"
               />
+              
+              {mode === 'signup' && formData.password && (
+                <div className="mt-2 space-y-1">
+                  <div className={`flex items-center text-xs ${
+                    passwordErrors.length ? 'text-red-400' : 'text-green-400'
+                  }`}>
+                    <span className="mr-1">{passwordErrors.length ? '✗' : '✓'}</span>
+                    <span>At least 8 characters</span>
+                  </div>
+                  <div className={`flex items-center text-xs ${
+                    passwordErrors.uppercase ? 'text-red-400' : 'text-green-400'
+                  }`}>
+                    <span className="mr-1">{passwordErrors.uppercase ? '✗' : '✓'}</span>
+                    <span>At least one uppercase letter</span>
+                  </div>
+                  <div className={`flex items-center text-xs ${
+                    passwordErrors.special ? 'text-red-400' : 'text-green-400'
+                  }`}>
+                    <span className="mr-1">{passwordErrors.special ? '✗' : '✓'}</span>
+                    <span>At least one special character (number or symbol)</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {mode === 'signup' && (
@@ -170,7 +352,7 @@ export default function AuthPage({ setUser, setView }) {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !isSignupValid}
               className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:cursor-not-allowed"
             >
               {loading ? 'Processing...' : mode === 'login' ? 'Login' : 'Sign Up'}
@@ -194,7 +376,7 @@ export default function AuthPage({ setUser, setView }) {
               <svg className="size-5" viewBox="0 0 24 24">
                 <path
                   fill="currentColor"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.261.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
                 />
                 <path
                   fill="currentColor"

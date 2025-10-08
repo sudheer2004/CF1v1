@@ -4,7 +4,7 @@ import socketService from '../services/socket.service';
 import useMatchManager from '../hooks/useMatchManager';
 import ActiveMatchView from './ActiveMatchView';
 import MatchResultView from './MatchResultView';
-import MatchSettingsForm from './MatchSettingsForm';
+import MatchSettingsForm, { isFormValid } from './MatchSettingsForm';
 
 export default function Matchmaking({
   user, socket, activeMatch, setActiveMatch,
@@ -229,7 +229,7 @@ export default function Matchmaking({
 
         <button
           onClick={handleJoinQueue}
-          disabled={!user.cfHandle || isJoiningQueue || activeMatch}
+          disabled={!user.cfHandle || !isFormValid(formData) || isJoiningQueue || activeMatch}
           className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition flex items-center justify-center space-x-2"
         >
           {isJoiningQueue ? (
@@ -239,6 +239,8 @@ export default function Matchmaking({
             </>
           ) : activeMatch ? (
             <span>Complete Current Match First</span>
+          ) : !isFormValid(formData) ? (
+            <span>Invalid Settings</span>
           ) : (
             <span>{!user.cfHandle ? 'Add CF Handle First' : 'Join Queue'}</span>
           )}

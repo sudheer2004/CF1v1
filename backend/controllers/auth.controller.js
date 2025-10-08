@@ -23,6 +23,15 @@ const signup = async (req, res) => {
       });
     }
 
+    // Check if username already exists
+    const existingUsername = await userService.findUserByUsername(username);
+    if (existingUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username already taken',
+      });
+    }
+
     // Create user
     const user = await userService.createUser(email, password, username, cfHandle);
 
@@ -125,10 +134,9 @@ const getCurrentUser = async (req, res) => {
   }
 };
 
-// Google OAuth callback (simplified redirect)
+// Google OAuth callback
 const googleCallback = async (req, res) => {
   try {
-    // Check if user exists in req (set by Passport)
     if (!req.user) {
       console.error('No user data received from Google');
       return res.redirect(`${process.env.FRONTEND_URL}?error=auth_failed`);
@@ -150,9 +158,84 @@ const googleCallback = async (req, res) => {
   }
 };
 
+// Check username availability
+const checkUsername = async (req, res) => {
+  try {
+    const { username } = req.params;
+    
+    console.log('=== USERNAME CHECK START ===');
+    console.log('Raw params:', req.params);
+    console.log('Username received:', username);
+    console.log('Username type:', typeof username);
+    console.log('Username length:', username?.length);
+    
+    // Validate username format
+    if (!username || username.length < 3) {
+      console.log('Username validation failed - too short');
+      return res.json({ exists: false });
+    }
+    
+    // Check if username exists in database
+    console.log('Querying database for username:', username);
+    const existingUser = await userService.findUserByUsername(username);
+    
+    console.log('Database query completed');
+    console.log('Result:', JSON.stringify(existingUser, null, 2));
+    console.log('User exists?:', !!existingUser);
+    console.log('=== USERNAME CHECK END ===');
+    
+    res.json({ exists: !!existingUser });
+  } catch (error) {
+    console.error('=== ERROR IN USERNAME CHECK ===');
+    console.error('Error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    res.json({ exists: false });
+  }
+};
+
+// Check email availability
+const checkEmail = async (req, res) => {
+  try {
+    const { email } = req.params;
+    
+    console.log('=== EMAIL CHECK START ===');
+    console.log('Raw params:', req.params);
+    console.log('Email received:', email);
+    console.log('Email type:', typeof email);
+    console.log('Email length:', email?.length);
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || !emailRegex.test(email)) {
+      console.log('Email validation failed - invalid format');
+      return res.json({ exists: false });
+    }
+    
+    // Check if email exists in database
+    console.log('Querying database for email:', email);
+    const existingUser = await userService.findUserByEmail(email);
+    
+    console.log('Database query completed');
+    console.log('Result:', JSON.stringify(existingUser, null, 2));
+    console.log('User exists?:', !!existingUser);
+    console.log('=== EMAIL CHECK END ===');
+    
+    res.json({ exists: !!existingUser });
+  } catch (error) {
+    console.error('=== ERROR IN EMAIL CHECK ===');
+    console.error('Error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    res.json({ exists: false });
+  }
+};
+
 module.exports = {
   signup,
   login,
   getCurrentUser,
   googleCallback,
+  checkUsername,
+  checkEmail,
 };

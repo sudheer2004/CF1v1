@@ -1,28 +1,53 @@
 const prisma = require('../config/database.config');
 const { generateDuelCode } = require('../utils/helpers.util');
+const { validateMatchSettings, sanitizeMatchSettings } = require('../validators/match.validator');
 
 // Create new duel
 const createDuel = async (creatorId, ratingMin, ratingMax, tags, duration) => {
+  // Sanitize inputs first
+  const sanitized = sanitizeMatchSettings(ratingMin, ratingMax, tags, duration);
+  
+  // Validate settings
+  const validation = validateMatchSettings(
+    sanitized.ratingMin,
+    sanitized.ratingMax,
+    sanitized.tags,
+    sanitized.duration
+  );
+
+  if (!validation.isValid) {
+    const error = new Error('Invalid duel settings');
+    error.details = validation.errors;
+    throw error;
+  }
+
   // Generate unique duel code
   let duelCode;
   let isUnique = false;
+  let attempts = 0;
+  const maxAttempts = 10;
 
-  while (!isUnique) {
+  while (!isUnique && attempts < maxAttempts) {
     duelCode = generateDuelCode();
     const existing = await prisma.duel.findUnique({
       where: { duelCode },
     });
     if (!existing) isUnique = true;
+    attempts++;
+  }
+
+  if (!isUnique) {
+    throw new Error('Failed to generate unique duel code. Please try again.');
   }
 
   const duel = await prisma.duel.create({
     data: {
       duelCode,
       creatorId,
-      ratingMin,
-      ratingMax,
-      tags,
-      duration,
+      ratingMin: sanitized.ratingMin,
+      ratingMax: sanitized.ratingMax,
+      tags: sanitized.tags,
+      duration: sanitized.duration,
       status: 'waiting',
     },
     include: {
@@ -42,8 +67,20 @@ const createDuel = async (creatorId, ratingMin, ratingMax, tags, duration) => {
 
 // Join existing duel
 const joinDuel = async (duelCode, opponentId) => {
+  // Validate duel code format
+  if (!duelCode || typeof duelCode !== 'string') {
+    throw new Error('Invalid duel code format');
+  }
+
+  // Sanitize duel code (remove whitespace, convert to uppercase)
+  const sanitizedCode = duelCode.trim().toUpperCase();
+
+  if (sanitizedCode.length !== 8) {
+    throw new Error('Duel code must be 8 characters');
+  }
+
   const duel = await prisma.duel.findUnique({
-    where: { duelCode },
+    where: { duelCode: sanitizedCode },
     include: {
       creator: {
         select: {
@@ -73,7 +110,7 @@ const joinDuel = async (duelCode, opponentId) => {
   }
 
   const updatedDuel = await prisma.duel.update({
-    where: { duelCode },
+    where: { duelCode: sanitizedCode },
     data: {
       opponentId,
     },
@@ -102,8 +139,15 @@ const joinDuel = async (duelCode, opponentId) => {
 
 // Get duel by code
 const getDuelByCode = async (duelCode) => {
+  // Validate and sanitize duel code
+  if (!duelCode || typeof duelCode !== 'string') {
+    throw new Error('Invalid duel code format');
+  }
+
+  const sanitizedCode = duelCode.trim().toUpperCase();
+
   const duel = await prisma.duel.findUnique({
-    where: { duelCode },
+    where: { duelCode: sanitizedCode },
     include: {
       creator: {
         select: {
@@ -129,6 +173,10 @@ const getDuelByCode = async (duelCode) => {
 
 // Start duel (set problem and start time)
 const startDuel = async (duelId, problemId, problemName, problemRating) => {
+  if (!duelId) {
+    throw new Error('Duel ID is required');
+  }
+
   const duel = await prisma.duel.update({
     where: { id: duelId },
     data: {

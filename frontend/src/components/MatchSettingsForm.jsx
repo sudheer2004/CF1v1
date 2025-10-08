@@ -40,6 +40,21 @@ const PROBLEM_TAGS = [
   'two pointers',
 ];
 
+// Validation helper function - export this to use in parent components
+export const isFormValid = (formData) => {
+  const ratingValid = formData.ratingMin >= 800 && 
+                     formData.ratingMin <= 3500 && 
+                     formData.ratingMax >= 800 && 
+                     formData.ratingMax <= 3500 &&
+                     formData.ratingMin <= formData.ratingMax;
+  
+  const durationValid = formData.duration >= 1 && 
+                       formData.duration <= 180 &&
+                       Number.isInteger(formData.duration);
+  
+  return ratingValid && durationValid;
+};
+
 export default function MatchSettingsForm({
   formData,
   setFormData,
@@ -82,8 +97,24 @@ export default function MatchSettingsForm({
   const handleCustomDurationChange = (value) => {
     setCustomDuration(value);
     const duration = parseInt(value);
-    if (duration >= 1 && duration <= 180) {
+    if (!isNaN(duration) && duration >= 1 && duration <= 180) {
       setFormData({ ...formData, duration });
+    } else if (value === '') {
+      // If field is cleared, set to invalid value to trigger validation
+      setFormData({ ...formData, duration: 0 });
+    } else {
+      // Invalid input - set to invalid value
+      setFormData({ ...formData, duration: -1 });
+    }
+  };
+
+  const handleRatingChange = (field, value) => {
+    const rating = parseInt(value);
+    if (!isNaN(rating)) {
+      setFormData({ ...formData, [field]: rating });
+    } else if (value === '') {
+      // If field is cleared, set to 0 to trigger validation
+      setFormData({ ...formData, [field]: 0 });
     }
   };
 
@@ -106,32 +137,40 @@ export default function MatchSettingsForm({
             <input
               type="number"
               value={formData.ratingMin}
-              onChange={(e) =>
-                setFormData({ ...formData, ratingMin: parseInt(e.target.value) || 800 })
-              }
+              onChange={(e) => handleRatingChange('ratingMin', e.target.value)}
               min="800"
               max="3500"
               step="100"
               disabled={disabled}
               className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500 disabled:opacity-50"
             />
+            {(formData.ratingMin < 800 || formData.ratingMin > 3500) && (
+              <p className="text-red-400 text-xs mt-1">Rating must be between 800-3500</p>
+            )}
           </div>
           <div>
             <label className="block text-sm text-gray-400 mb-2">Max Rating</label>
             <input
               type="number"
               value={formData.ratingMax}
-              onChange={(e) =>
-                setFormData({ ...formData, ratingMax: parseInt(e.target.value) || 1600 })
-              }
+              onChange={(e) => handleRatingChange('ratingMax', e.target.value)}
               min="800"
               max="3500"
               step="100"
               disabled={disabled}
               className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500 disabled:opacity-50"
             />
+            {(formData.ratingMax < 800 || formData.ratingMax > 3500) && (
+              <p className="text-red-400 text-xs mt-1">Rating must be between 800-3500</p>
+            )}
           </div>
         </div>
+        {formData.ratingMin > formData.ratingMax && (
+          <p className="text-yellow-400 text-sm mt-2 flex items-center">
+            <span className="mr-1">⚠️</span>
+            Min rating cannot be greater than max rating
+          </p>
+        )}
       </div>
 
       {/* Duration */}
@@ -195,6 +234,9 @@ export default function MatchSettingsForm({
             </div>
           )}
         </div>
+        {useCustomDuration && customDuration && (parseInt(customDuration) < 1 || parseInt(customDuration) > 180) && (
+          <p className="text-red-400 text-xs mt-2">Duration must be between 1-180 minutes</p>
+        )}
       </div>
 
       {/* Tags with Search */}

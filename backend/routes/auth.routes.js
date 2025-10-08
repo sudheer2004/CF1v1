@@ -10,6 +10,12 @@ router.post('/signup', authController.signup);
 router.post('/login', authController.login);
 router.get('/me', authMiddleware, authController.getCurrentUser);
 
+// Username availability check
+router.get('/check-username/:username', authController.checkUsername);
+
+// Email availability check
+router.get('/check-email/:email', authController.checkEmail);
+
 // Google OAuth routes
 router.get(
   '/google',

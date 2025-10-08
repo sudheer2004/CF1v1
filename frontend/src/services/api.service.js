@@ -48,6 +48,14 @@ class ApiService {
     return this.call('/auth/me');
   }
 
+  async checkUsername(username) {
+    return this.call(`/auth/check-username/${username}`);
+  }
+
+  async checkEmail(email) {
+    return this.call(`/auth/check-email/${encodeURIComponent(email)}`);
+  }
+
   // Profile endpoints
   async getProfile(userId = 'me') {
     return this.call(`/profile/${userId}`);

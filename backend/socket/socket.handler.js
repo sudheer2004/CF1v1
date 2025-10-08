@@ -236,6 +236,12 @@ const initializeSocket = (io) => {
 
         const { ratingMin, ratingMax, tags, duration } = data;
 
+        // ADD VALIDATION CHECK
+        if (ratingMin === undefined || ratingMax === undefined || duration === undefined) {
+          socket.emit("error", { message: "Missing required match settings" });
+          return;
+        }
+
         const queueEntry = await matchmakingService.addToQueue(
           socket.userId,
           ratingMin,
@@ -340,9 +346,17 @@ const initializeSocket = (io) => {
         }
       } catch (error) {
         console.error("Join matchmaking error:", error);
-        socket.emit("error", {
-          message: error.message || "Failed to join matchmaking",
-        });
+        
+        // IMPROVED ERROR HANDLING
+        if (error.details && Array.isArray(error.details)) {
+          socket.emit("error", {
+            message: error.details.join(', ')
+          });
+        } else {
+          socket.emit("error", {
+            message: error.message || "Failed to join matchmaking",
+          });
+        }
       }
     });
 
@@ -376,6 +390,12 @@ const initializeSocket = (io) => {
 
         const { ratingMin, ratingMax, tags, duration } = data;
 
+        // ADD VALIDATION CHECK
+        if (ratingMin === undefined || ratingMax === undefined || duration === undefined) {
+          socket.emit("error", { message: "Missing required duel settings" });
+          return;
+        }
+
         const duel = await duelService.createDuel(
           socket.userId,
           ratingMin,
@@ -392,7 +412,17 @@ const initializeSocket = (io) => {
         socket.emit("duel-created", { duel });
       } catch (error) {
         console.error("Create duel error:", error);
-        socket.emit("error", { message: "Failed to create duel" });
+        
+        // IMPROVED ERROR HANDLING
+        if (error.details && Array.isArray(error.details)) {
+          socket.emit("error", {
+            message: error.details.join(', ')
+          });
+        } else {
+          socket.emit("error", { 
+            message: error.message || "Failed to create duel" 
+          });
+        }
       }
     });
 

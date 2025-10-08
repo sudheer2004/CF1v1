@@ -1,20 +1,38 @@
 const prisma = require('../config/database.config');
+const { validateMatchSettings, sanitizeMatchSettings } = require('../validators/match.validator');
 
 // Add user to matchmaking queue
 const addToQueue = async (userId, ratingMin, ratingMax, tags, duration) => {
+  // Sanitize inputs first
+  const sanitized = sanitizeMatchSettings(ratingMin, ratingMax, tags, duration);
+  
+  // Validate settings
+  const validation = validateMatchSettings(
+    sanitized.ratingMin,
+    sanitized.ratingMax,
+    sanitized.tags,
+    sanitized.duration
+  );
+
+  if (!validation.isValid) {
+    const error = new Error('Invalid match settings');
+    error.details = validation.errors;
+    throw error;
+  }
+
   // Remove any existing queue entries for this user
   await prisma.matchmakingQueue.deleteMany({
     where: { userId },
   });
 
-  // Add to queue
+  // Add to queue with sanitized values
   const queueEntry = await prisma.matchmakingQueue.create({
     data: {
       userId,
-      ratingMin,
-      ratingMax,
-      tags,
-      duration,
+      ratingMin: sanitized.ratingMin,
+      ratingMax: sanitized.ratingMax,
+      tags: sanitized.tags,
+      duration: sanitized.duration,
       status: 'waiting',
     },
     include: {
