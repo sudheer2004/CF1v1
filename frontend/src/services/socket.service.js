@@ -9,16 +9,16 @@ class SocketService {
 
   connect() {
     if (this.socket?.connected) {
-      console.log('Socket already connected');
+     
       return this.socket;
     }
 
-    console.log('🔌 Connecting to socket server...');
+  
     
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
     const socketUrl = apiUrl.replace('/api', '');
     
-    console.log('Socket URL:', socketUrl);
+    
     
     this.socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
@@ -31,17 +31,17 @@ class SocketService {
     });
 
     this.socket.on('connect', () => {
-      console.log('✅ Socket connected:', this.socket.id);
+    
       
       const token = localStorage.getItem('token');
       if (token && !this.authenticated) {
-        console.log('🔐 Re-authenticating after reconnection...');
+     
         this.authenticate(token);
       }
     });
 
     this.socket.on('disconnect', (reason) => {
-      console.log('❌ Socket disconnected:', reason);
+    
       this.authenticated = false;
     });
 
@@ -73,7 +73,7 @@ class SocketService {
 
     this.socket.on('connect', () => {
       this.eventHandlers.forEach((handler, event) => {
-        console.log('🔄 Re-registering event handler:', event);
+      
       });
     });
 
@@ -82,7 +82,7 @@ class SocketService {
 
   authenticate(token) {
     if (!this.socket?.connected) {
-      console.log('⚠️ Socket not connected, waiting for connection...');
+    
       
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -110,7 +110,7 @@ class SocketService {
   }
 
   doAuthenticate(token) {
-    console.log('🔐 Authenticating socket connection...');
+  
     this.socket.emit('authenticate', token);
 
     return new Promise((resolve, reject) => {
@@ -121,7 +121,7 @@ class SocketService {
       this.socket.once('authenticated', (data) => {
         clearTimeout(timeout);
         this.authenticated = true;
-        console.log('✅ Socket authenticated:', data.userId);
+       
         resolve(data);
       });
 
@@ -135,7 +135,7 @@ class SocketService {
 
   disconnect() {
     if (this.socket) {
-      console.log('🔌 Disconnecting socket...');
+    
       this.socket.disconnect();
       this.socket = null;
       this.authenticated = false;
@@ -170,7 +170,7 @@ class SocketService {
       return;
     }
     
-    console.log('📤 Emitting:', event, data);
+  
     this.socket.emit(event, data);
   }
 
@@ -186,7 +186,7 @@ class SocketService {
    * @param {number} criteria.minYear - Minimum problem year (optional, e.g. 2024)
    */
   joinMatchmaking(criteria) {
-    console.log('🎯 Joining matchmaking queue:', criteria);
+   
     
     // Validate criteria before sending
     if (!criteria.ratingMin || !criteria.ratingMax || !criteria.duration) {
@@ -207,7 +207,7 @@ class SocketService {
   }
 
   leaveMatchmaking() {
-    console.log('🚪 Leaving matchmaking queue');
+   
     this.emit('leave-matchmaking');
   }
 
@@ -223,7 +223,7 @@ class SocketService {
    * @param {number} settings.minYear - Minimum problem year (optional)
    */
   createDuel(settings) {
-    console.log('⚔️ Creating duel:', settings);
+ 
     
     const validSettings = {
       ...settings,
@@ -235,63 +235,63 @@ class SocketService {
   }
 
   joinDuel(duelCode) {
-    console.log('⚔️ Joining duel:', duelCode);
+    
     this.emit('join-duel', duelCode);
   }
 
   // ==================== MATCH ACTIONS ====================
   
   giveUp(matchId) {
-    console.log('🏳️ Giving up match:', matchId);
+   
     this.emit('give-up', { matchId });
   }
 
   offerDraw(matchId) {
-    console.log('🤝 Offering draw:', matchId);
+   
     this.emit('offer-draw', { matchId });
   }
 
   acceptDraw(matchId) {
-    console.log('✅ Accepting draw:', matchId);
+  
     this.emit('accept-draw', { matchId });
   }
 
   rejectDraw(matchId) {
-    console.log('❌ Rejecting draw:', matchId);
+  
     this.emit('reject-draw', { matchId });
   }
 
   // ==================== CHAT METHODS ====================
   
   getMatchMessages(matchId) {
-    console.log('📨 Getting messages for match:', matchId);
+    
     this.emit('get-match-messages', { matchId });
   }
 
   sendMessage(matchId, content) {
-    console.log('💬 Sending message:', { matchId, content });
+    
     this.emit('send-message', { matchId, content });
   }
 
   onNewMessage(matchId, handler) {
     const event = `new-message-${matchId}`;
-    console.log('👂 Listening for new messages:', event);
+  
     this.on(event, handler);
   }
 
   offNewMessage(matchId, handler) {
     const event = `new-message-${matchId}`;
-    console.log('🔇 Stopping message listener:', event);
+  
     this.off(event, handler);
   }
 
   onMessagesLoaded(handler) {
-    console.log('👂 Listening for messages loaded');
+  
     this.on('match-messages-loaded', handler);
   }
 
   offMessagesLoaded(handler) {
-    console.log('🔇 Stopping messages loaded listener');
+   
     this.off('match-messages-loaded', handler);
   }
 

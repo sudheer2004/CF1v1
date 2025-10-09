@@ -39,7 +39,7 @@ export default function App() {
       const authError = urlParams.get('error');
 
       if (token) {
-        console.log('✅ Google OAuth token received');
+      
         
         localStorage.setItem('token', token);
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -51,7 +51,7 @@ export default function App() {
           try {
             const matchResponse = await api.getActiveMatch();
             if (matchResponse.match && matchResponse.remainingTime > 0) {
-              console.log('✅ Restoring active match');
+            
               
               const now = Date.now();
               const remainingMs = matchResponse.remainingTime * 1000;
@@ -73,7 +73,7 @@ export default function App() {
               setView('dashboard');
             }
           } catch (err) {
-            console.log('No active match found');
+          
             setView('dashboard');
           }
           
@@ -100,13 +100,13 @@ export default function App() {
     const initializeSocket = async () => {
       const token = localStorage.getItem('token');
       if (!token || !user) {
-        console.log('⏭️ No token or user, skipping socket connection');
+      
         setSocketReady(false);
         return;
       }
 
       try {
-        console.log('🔌 Initializing socket connection...');
+      
         
         const newSocket = socketService.connect();
         setSocket(newSocket);
@@ -130,27 +130,27 @@ export default function App() {
         });
 
         await waitForConnection;
-        console.log('✅ Socket connected, authenticating...');
+       
         
         await socketService.authenticate(token);
-        console.log('✅ Socket authenticated successfully');
+       
         
         setSocketReady(true);
         
         newSocket.on('disconnect', (reason) => {
-          console.log('❌ Socket disconnected:', reason);
+         
           setSocketReady(false);
           
           if (reason === 'io server disconnect') {
-            console.log('🔄 Attempting to reconnect...');
+          
             newSocket.connect();
           }
         });
 
         newSocket.on('connect', () => {
-          console.log('✅ Socket reconnected');
+       
           socketService.authenticate(token).then(() => {
-            console.log('✅ Re-authenticated after reconnection');
+          
             setSocketReady(true);
           }).catch(err => {
             console.error('❌ Re-authentication failed:', err);
@@ -178,9 +178,7 @@ export default function App() {
       
       setSocketReady(isConnected && isAuthenticated);
       
-      if (!isConnected) {
-        console.log('⚠️ Socket not connected, checking status...');
-      }
+     
     }, 3000);
 
     return () => clearInterval(checkInterval);
@@ -192,14 +190,14 @@ export default function App() {
 
     if (view !== 'matchmaking' && view !== 'duel') return;
 
-    console.log('🔄 Starting fallback match checker...');
+
     
     const pollInterval = setInterval(async () => {
       try {
         const matchResponse = await api.getActiveMatch();
         
         if (matchResponse.match && matchResponse.remainingTime > 0) {
-          console.log('✅ FALLBACK: Found active match via API poll!');
+       
           
           const now = Date.now();
           const totalDuration = matchResponse.match.duration * 60;
@@ -227,7 +225,7 @@ export default function App() {
     }, 5000);
 
     return () => {
-      console.log('🛑 Stopping fallback match checker');
+    
       clearInterval(pollInterval);
     };
   }, [user, activeMatch, matchResult, view]);
@@ -238,29 +236,18 @@ export default function App() {
   useEffect(() => {
     // Clear any existing timer first
     if (timerIntervalRef.current) {
-      console.log('🧹 Clearing existing timer interval');
+    
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
     }
 
     // Only start timer if we have an active match with server timestamps
     if (!activeMatch || !activeMatch.serverStartTime || !activeMatch.serverDuration) {
-      console.log('⏸️ No active match data, not starting timer');
+    
       return;
     }
 
-    console.log('==========================================');
-    console.log('⏱️ TIMER STARTING');
-    console.log('==========================================');
-    console.log('Match Key:', activeMatch.matchKey);
-    console.log('Current Time:', new Date().toISOString());
-    console.log('Server Start Time:', new Date(activeMatch.serverStartTime).toISOString());
-    console.log('Server Start Time (ms):', activeMatch.serverStartTime);
-    console.log('Current Time (ms):', Date.now());
-    console.log('Time Difference (ms):', Date.now() - activeMatch.serverStartTime);
-    console.log('Duration (seconds):', activeMatch.serverDuration);
-    console.log('Duration (minutes):', activeMatch.serverDuration / 60);
-    console.log('==========================================');
+
     
     matchEndHandledRef.current = false;
 
@@ -275,16 +262,7 @@ export default function App() {
 
     // Set initial timer
     const { remaining: initialRemaining, elapsed: initialElapsed, now: initialNow } = calculateRemainingTime();
-    console.log('📊 INITIAL CALCULATION:');
-    console.log('   Now:', initialNow);
-    console.log('   Start Time:', activeMatch.serverStartTime);
-    console.log('   Difference (ms):', initialNow - activeMatch.serverStartTime);
-    console.log('   Elapsed (seconds):', initialElapsed);
-    console.log('   Duration (seconds):', activeMatch.serverDuration);
-    console.log('   Remaining (seconds):', initialRemaining);
-    console.log('   Remaining (formatted):', Math.floor(initialRemaining / 60) + ':' + (initialRemaining % 60).toString().padStart(2, '0'));
-    console.log('==========================================');
-    
+   
     setMatchTimer(initialRemaining);
 
     // Start interval with debug logging for first 10 ticks
@@ -294,12 +272,7 @@ export default function App() {
       
       tickCount++;
       
-      // Log first 10 ticks to see what's happening
-      if (tickCount <= 10) {
-        console.log(`⏱️ Tick ${tickCount}: Elapsed=${elapsed}s, Remaining=${remaining}s (${Math.floor(remaining/60)}:${(remaining%60).toString().padStart(2,'0')})`);
-      } else if (remaining % 30 === 0 && remaining > 0) {
-        console.log('⏱️ Timer:', remaining, 'seconds remaining');
-      }
+     
       
       setMatchTimer(remaining);
     }, 1000);
@@ -307,7 +280,7 @@ export default function App() {
     // Cleanup
     return () => {
       if (timerIntervalRef.current) {
-        console.log('🛑 Cleaning up timer interval');
+      
         clearInterval(timerIntervalRef.current);
         timerIntervalRef.current = null;
       }
@@ -319,11 +292,11 @@ export default function App() {
     if (!activeMatch || matchResult || matchEndHandledRef.current) return;
     
     if (matchTimer === 0) {
-      console.log('⏰ Timer reached 0, waiting for backend...');
+     
       matchEndHandledRef.current = true;
       
       const timeoutId = setTimeout(() => {
-        console.log('🔄 No match-end event received, forcing draw');
+       
         
         setMatchResult({
           won: false,
@@ -354,7 +327,7 @@ export default function App() {
   useEffect(() => {
     if (!activeMatch || !user) return;
 
-    console.log('🔄 Starting periodic server sync for timer accuracy');
+  
 
     const syncInterval = setInterval(async () => {
       try {
@@ -366,8 +339,7 @@ export default function App() {
           const drift = Math.abs(serverRemaining - clientRemaining);
           
           if (drift > 5) {
-            console.log('⚠️ Timer drift detected:', drift, 'seconds. Syncing with server...');
-            console.log('   Server says:', serverRemaining, 'Client says:', clientRemaining);
+           
             
             // Update activeMatch with corrected timestamps
             setActiveMatch(prev => {
@@ -384,21 +356,21 @@ export default function App() {
               };
             });
             
-            console.log('✅ Timer synced and restarted');
+           
           }
           
           // Update attempts
           setMatchAttempts(matchResponse.attempts);
         } else if (!matchResponse.match) {
-          console.log('⚠️ Server says no active match - may have ended');
+         
         }
       } catch (err) {
-        console.log('Sync check: No active match on server');
+       
       }
     }, 15000);
 
     return () => {
-      console.log('🛑 Stopping periodic server sync');
+     
       clearInterval(syncInterval);
     };
   }, [activeMatch?.match?.id, user]);
@@ -416,10 +388,10 @@ export default function App() {
             const matchData = matchResponse;
             
             if (matchData.remainingTime <= 0) {
-              console.log('⏰ Active match found but expired, skipping restore');
+             
               setView('dashboard');
             } else {
-              console.log('✅ Restoring active match with', matchData.remainingTime, 'seconds remaining');
+              
               
               const now = Date.now();
               const totalDuration = matchData.match.duration * 60;
@@ -442,7 +414,7 @@ export default function App() {
             setView('dashboard');
           }
         } catch (err) {
-          console.log('No active match found');
+        
           setView('dashboard');
         }
       } catch (err) {
