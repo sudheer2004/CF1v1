@@ -58,19 +58,41 @@ export default function Matchmaking({
     };
 
     const handleMatchFound = (data) => {
-      console.log('🎮 Match found in matchmaking');
+      console.log('==========================================');
+      console.log('🎮 MATCH FOUND IN MATCHMAKING');
+      console.log('==========================================');
+      console.log('Raw match data:', JSON.stringify(data, null, 2));
+      console.log('Match startedAt from server:', data.match.startedAt);
+      console.log('Current client time:', new Date().toISOString());
+      console.log('Match duration (minutes):', data.match.duration);
+      
       setInQueue(false);
       setIsJoiningQueue(false);
       
       const matchDuration = data.match.duration * 60;
+      const now = Date.now();
+      
+      console.log('📝 Setting active match with:');
+      console.log('   Client Now (ms):', now);
+      console.log('   Client Now (ISO):', new Date(now).toISOString());
+      console.log('   Duration (seconds):', matchDuration);
+      console.log('   Duration (minutes):', matchDuration / 60);
+      console.log('   matchKey:', `${data.match.id}-${Date.now()}`);
+      
       setActiveMatch({
         ...data,
-        startTime: Date.now(),
-        matchDuration: matchDuration,
+        matchKey: `${data.match.id}-${Date.now()}`,
+        serverStartTime: now,
+        serverDuration: matchDuration,
       });
+      
+      console.log('⏱️ Setting initial matchTimer to:', matchDuration, 'seconds');
       setMatchTimer(matchDuration);
       setMatchResult(null);
       setMatchAttempts({ player1: 0, player2: 0 });
+      
+      console.log('✅ Match state set - timer should start immediately');
+      console.log('==========================================');
     };
 
     const handleError = (err) => {

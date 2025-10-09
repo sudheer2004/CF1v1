@@ -1,34 +1,36 @@
 const express = require('express');
 const passport = require('passport');
-const authController = require('../controllers/auth.controller');
-const authMiddleware = require('../middlewares/auth.middleware');
-
 const router = express.Router();
 
-// Email/Password routes
-router.post('/signup', authController.signup);
-router.post('/login', authController.login);
-router.get('/me', authMiddleware, authController.getCurrentUser);
+const authController = require('../controllers/auth.controller');
+const authMiddleware = require('../middlewares/auth.middleware');
+const { authLimiter, checkLimiter } = require('../middlewares/rateLimiter.middleware');
 
-// Username availability check
-router.get('/check-username/:username', authController.checkUsername);
+// Public routes with rate limiting
+router.post('/signup', authLimiter, authController.signup);
+router.post('/login', authLimiter, authController.login);
+router.post('/logout', authController.logout);
 
-// Email availability check
-router.get('/check-email/:email', authController.checkEmail);
+// Check availability endpoints with separate rate limiting
+router.get('/check/username/:username', checkLimiter, authController.checkUsername);
+router.get('/check/email/:email', checkLimiter, authController.checkEmail);
 
 // Google OAuth routes
-router.get(
-  '/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
+router.get('/google',
+  passport.authenticate('google', {
+    scope: ['profile', 'email']
+  })
 );
 
-router.get(
-  '/google/callback',
-  passport.authenticate('google', { 
+router.get('/google/callback',
+  passport.authenticate('google', {
+    failureRedirect: `${process.env.FRONTEND_URL}?error=auth_failed`,
     session: false,
-    failureRedirect: `${process.env.FRONTEND_URL}/auth/error`
   }),
   authController.googleCallback
 );
+
+// Protected routes (require authentication)
+router.get('/me', authMiddleware, authController.getCurrentUser);
 
 module.exports = router;

@@ -7,6 +7,7 @@ import Matchmaking from './components/Matchmaking';
 import DuelMode from './components/DuelMode';
 import Leaderboard from './components/Leaderboard';
 import Profile from './components/Profile';
+import ReportIssues from './components/ReportIssues';
 import api from './services/api.service';
 import socketService from './services/socket.service';
 
@@ -22,9 +23,6 @@ export default function App() {
   const [matchAttempts, setMatchAttempts] = useState({ player1: 0, player2: 0 });
   const [error, setError] = useState(null);
 
-  // CRITICAL: Store the actual server timestamp for accurate time calculation
-  const matchStartTimeRef = useRef(null);
-  const matchDurationRef = useRef(null);
   const timerIntervalRef = useRef(null);
   const matchEndHandledRef = useRef(false);
 
@@ -55,14 +53,18 @@ export default function App() {
             if (matchResponse.match && matchResponse.remainingTime > 0) {
               console.log('✅ Restoring active match');
               
-              // Store server timestamps
-              matchStartTimeRef.current = new Date(matchResponse.match.startedAt).getTime();
-              matchDurationRef.current = matchResponse.match.duration * 60;
+              const now = Date.now();
+              const remainingMs = matchResponse.remainingTime * 1000;
+              const totalDuration = matchResponse.match.duration * 60;
+              const elapsed = totalDuration - matchResponse.remainingTime;
               
               setActiveMatch({
                 match: matchResponse.match,
                 opponent: matchResponse.opponent,
                 problemUrl: matchResponse.problemUrl,
+                matchKey: `${matchResponse.match.id}-oauth-${Date.now()}`,
+                serverStartTime: now - (elapsed * 1000),
+                serverDuration: totalDuration,
               });
               setMatchTimer(matchResponse.remainingTime);
               setMatchAttempts(matchResponse.attempts);
@@ -199,14 +201,17 @@ export default function App() {
         if (matchResponse.match && matchResponse.remainingTime > 0) {
           console.log('✅ FALLBACK: Found active match via API poll!');
           
-          // Store server timestamps
-          matchStartTimeRef.current = new Date(matchResponse.match.startedAt).getTime();
-          matchDurationRef.current = matchResponse.match.duration * 60;
+          const now = Date.now();
+          const totalDuration = matchResponse.match.duration * 60;
+          const elapsed = totalDuration - matchResponse.remainingTime;
           
           setActiveMatch({
             match: matchResponse.match,
             opponent: matchResponse.opponent,
             problemUrl: matchResponse.problemUrl,
+            matchKey: `${matchResponse.match.id}-fallback-${Date.now()}`,
+            serverStartTime: now - (elapsed * 1000),
+            serverDuration: totalDuration,
           });
           
           setMatchTimer(matchResponse.remainingTime);
@@ -228,7 +233,7 @@ export default function App() {
   }, [user, activeMatch, matchResult, view]);
 
   // ============================================
-  // SERVER-SYNCED TIMER - CALCULATES FROM SERVER TIME
+  // SERVER-SYNCED TIMER WITH DEBUG LOGGING
   // ============================================
   useEffect(() => {
     // Clear any existing timer first
@@ -238,45 +243,68 @@ export default function App() {
       timerIntervalRef.current = null;
     }
 
-    // Only start timer if we have an active match
-    if (!activeMatch || !matchStartTimeRef.current || !matchDurationRef.current) {
+    // Only start timer if we have an active match with server timestamps
+    if (!activeMatch || !activeMatch.serverStartTime || !activeMatch.serverDuration) {
       console.log('⏸️ No active match data, not starting timer');
       return;
     }
 
-    console.log('⏱️ Starting server-synced timer');
-    console.log('   Match started at:', new Date(matchStartTimeRef.current).toISOString());
-    console.log('   Duration:', matchDurationRef.current, 'seconds');
+    console.log('==========================================');
+    console.log('⏱️ TIMER STARTING');
+    console.log('==========================================');
+    console.log('Match Key:', activeMatch.matchKey);
+    console.log('Current Time:', new Date().toISOString());
+    console.log('Server Start Time:', new Date(activeMatch.serverStartTime).toISOString());
+    console.log('Server Start Time (ms):', activeMatch.serverStartTime);
+    console.log('Current Time (ms):', Date.now());
+    console.log('Time Difference (ms):', Date.now() - activeMatch.serverStartTime);
+    console.log('Duration (seconds):', activeMatch.serverDuration);
+    console.log('Duration (minutes):', activeMatch.serverDuration / 60);
+    console.log('==========================================');
     
     matchEndHandledRef.current = false;
 
-    // Function to calculate remaining time from server timestamp
+    // Function to calculate remaining time
     const calculateRemainingTime = () => {
       const now = Date.now();
-      const elapsed = Math.floor((now - matchStartTimeRef.current) / 1000);
-      const remaining = Math.max(0, matchDurationRef.current - elapsed);
+      const elapsed = Math.floor((now - activeMatch.serverStartTime) / 1000);
+      const remaining = Math.max(0, activeMatch.serverDuration - elapsed);
       
-      return remaining;
+      return { remaining, elapsed, now };
     };
 
-    // Set initial timer from calculation
-    const initialRemaining = calculateRemainingTime();
-    console.log('   Initial remaining time:', initialRemaining, 'seconds');
+    // Set initial timer
+    const { remaining: initialRemaining, elapsed: initialElapsed, now: initialNow } = calculateRemainingTime();
+    console.log('📊 INITIAL CALCULATION:');
+    console.log('   Now:', initialNow);
+    console.log('   Start Time:', activeMatch.serverStartTime);
+    console.log('   Difference (ms):', initialNow - activeMatch.serverStartTime);
+    console.log('   Elapsed (seconds):', initialElapsed);
+    console.log('   Duration (seconds):', activeMatch.serverDuration);
+    console.log('   Remaining (seconds):', initialRemaining);
+    console.log('   Remaining (formatted):', Math.floor(initialRemaining / 60) + ':' + (initialRemaining % 60).toString().padStart(2, '0'));
+    console.log('==========================================');
+    
     setMatchTimer(initialRemaining);
 
-    // Update timer every second by recalculating from server time
+    // Start interval with debug logging for first 10 ticks
+    let tickCount = 0;
     timerIntervalRef.current = setInterval(() => {
-      const remaining = calculateRemainingTime();
+      const { remaining, elapsed } = calculateRemainingTime();
       
-      // Log every 30 seconds
-      if (remaining % 30 === 0 && remaining > 0) {
+      tickCount++;
+      
+      // Log first 10 ticks to see what's happening
+      if (tickCount <= 10) {
+        console.log(`⏱️ Tick ${tickCount}: Elapsed=${elapsed}s, Remaining=${remaining}s (${Math.floor(remaining/60)}:${(remaining%60).toString().padStart(2,'0')})`);
+      } else if (remaining % 30 === 0 && remaining > 0) {
         console.log('⏱️ Timer:', remaining, 'seconds remaining');
       }
       
       setMatchTimer(remaining);
     }, 1000);
 
-    // Cleanup function
+    // Cleanup
     return () => {
       if (timerIntervalRef.current) {
         console.log('🛑 Cleaning up timer interval');
@@ -284,7 +312,7 @@ export default function App() {
         timerIntervalRef.current = null;
       }
     };
-  }, [activeMatch?.match?.id]); // Only depend on match ID
+  }, [activeMatch?.matchKey]);
 
   // Handle timer expiry - SEPARATE from timer itself
   useEffect(() => {
@@ -309,8 +337,6 @@ export default function App() {
         });
         setActiveMatch(null);
         setMatchTimer(0);
-        matchStartTimeRef.current = null;
-        matchDurationRef.current = null;
         setError('Match timed out. The server may have had an issue.');
         
         setTimeout(() => {
@@ -335,22 +361,30 @@ export default function App() {
         const matchResponse = await api.getActiveMatch();
         
         if (matchResponse.match && matchResponse.match.id === activeMatch.match.id) {
-          // Update server time reference if there's significant drift
           const serverRemaining = matchResponse.remainingTime;
           const clientRemaining = matchTimer;
           const drift = Math.abs(serverRemaining - clientRemaining);
           
-          if (drift > 3) {
+          if (drift > 5) {
             console.log('⚠️ Timer drift detected:', drift, 'seconds. Syncing with server...');
             console.log('   Server says:', serverRemaining, 'Client says:', clientRemaining);
             
-            // Recalculate start time based on server's remaining time
-            const now = Date.now();
-            const duration = matchResponse.match.duration * 60;
-            const elapsed = duration - serverRemaining;
-            matchStartTimeRef.current = now - (elapsed * 1000);
+            // Update activeMatch with corrected timestamps
+            setActiveMatch(prev => {
+              const now = Date.now();
+              const duration = matchResponse.match.duration * 60;
+              const elapsed = duration - serverRemaining;
+              const correctedStartTime = now - (elapsed * 1000);
+              
+              return {
+                ...prev,
+                serverStartTime: correctedStartTime,
+                serverDuration: duration,
+                matchKey: `${prev.match.id}-synced-${Date.now()}`,
+              };
+            });
             
-            console.log('✅ Timer synced. New start time:', new Date(matchStartTimeRef.current).toISOString());
+            console.log('✅ Timer synced and restarted');
           }
           
           // Update attempts
@@ -361,13 +395,13 @@ export default function App() {
       } catch (err) {
         console.log('Sync check: No active match on server');
       }
-    }, 15000); // Sync every 15 seconds
+    }, 15000);
 
     return () => {
       console.log('🛑 Stopping periodic server sync');
       clearInterval(syncInterval);
     };
-  }, [activeMatch, matchTimer, user]);
+  }, [activeMatch?.match?.id, user]);
 
   const checkAuth = async () => {
     const token = localStorage.getItem('token');
@@ -387,14 +421,17 @@ export default function App() {
             } else {
               console.log('✅ Restoring active match with', matchData.remainingTime, 'seconds remaining');
               
-              // Store server timestamps for accurate calculation
-              matchStartTimeRef.current = new Date(matchData.match.startedAt).getTime();
-              matchDurationRef.current = matchData.match.duration * 60;
+              const now = Date.now();
+              const totalDuration = matchData.match.duration * 60;
+              const elapsed = totalDuration - matchData.remainingTime;
               
               setActiveMatch({
                 match: matchData.match,
                 opponent: matchData.opponent,
                 problemUrl: matchData.problemUrl,
+                matchKey: `${matchData.match.id}-restored-${Date.now()}`,
+                serverStartTime: now - (elapsed * 1000),
+                serverDuration: totalDuration,
               });
               
               setMatchTimer(matchData.remainingTime);
@@ -421,10 +458,6 @@ export default function App() {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
     }
-
-    // Clear time references
-    matchStartTimeRef.current = null;
-    matchDurationRef.current = null;
 
     if (socket) {
       socketService.disconnect();
@@ -508,6 +541,7 @@ export default function App() {
             )}
             {view === 'leaderboard' && <Leaderboard />}
             {view === 'profile' && <Profile user={user} setUser={setUser} />}
+            {view === 'report-issues' && <ReportIssues user={user} />}
           </main>
         </>
       ) : (

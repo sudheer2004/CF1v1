@@ -80,16 +80,23 @@ export default function DuelMode({
       setIsCreatingDuel(false);
       
       const matchDuration = data.match.duration * 60;
+      
+      // ✅ FIXED: Use CLIENT time, not server startedAt
+      // This prevents the 10-second freeze issue
+      const now = Date.now();
+      
       setActiveMatch({
         ...data,
-        startTime: Date.now(),
-        matchDuration: matchDuration,
+        matchKey: `${data.match.id}-duel-${Date.now()}`,
+        serverStartTime: now, // Use current client time as start
+        serverDuration: matchDuration,
       });
+      
       setMatchTimer(matchDuration);
       setMatchResult(null);
       setMatchAttempts({ player1: 0, player2: 0 });
       
-      console.log('✅ DuelMode: Match state updated');
+      console.log('✅ DuelMode: Match state updated - Timer will start immediately from:', matchDuration, 'seconds');
     };
 
     const handleError = (err) => {

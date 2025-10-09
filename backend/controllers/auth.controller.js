@@ -1,16 +1,69 @@
 const userService = require('../services/user.service');
 const { generateToken } = require('../utils/jwt.util');
 
+// Email validation regex
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
+
+// Password validation
+const validatePassword = (password) => {
+  if (password.length < 8) {
+    return 'Password must be at least 8 characters long';
+  }
+  
+  const hasUpperCase = /[A-Z]/.test(password);
+  const hasLowerCase = /[a-z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  
+  if (!hasUpperCase || !hasLowerCase || !hasNumber) {
+    return 'Password must contain uppercase, lowercase, and numbers';
+  }
+  
+  return null;
+};
+
 // Signup with email/password
 const signup = async (req, res) => {
   try {
     const { email, password, username, cfHandle } = req.body;
 
-    // Validate input
+    // Validate input presence
     if (!email || !password || !username) {
       return res.status(400).json({
         success: false,
         message: 'Email, password, and username are required',
+      });
+    }
+
+    // Validate email format
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email format',
+      });
+    }
+
+    // Validate username format and length
+    if (username.length < 3 || username.length > 20) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username must be between 3 and 20 characters',
+      });
+    }
+
+    if (!USERNAME_REGEX.test(username)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username can only contain letters, numbers, and underscores',
+      });
+    }
+
+    // Validate password strength
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({
+        success: false,
+        message: passwordError,
       });
     }
 
@@ -38,19 +91,29 @@ const signup = async (req, res) => {
     // Generate token
     const token = generateToken({ userId: user.id, email: user.email });
 
+    // Set httpOnly cookie for security
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+
     res.status(201).json({
       success: true,
       message: 'User created successfully',
       data: {
         user,
-        token,
+        token, // Also send in response for frontend flexibility
       },
     });
   } catch (error) {
     console.error('Signup error:', error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to create user',
+      message: process.env.NODE_ENV === 'production' 
+        ? 'Failed to create user' 
+        : error.message,
     });
   }
 };
@@ -65,6 +128,14 @@ const login = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Email and password are required',
+      });
+    }
+
+    // Validate email format
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email format',
       });
     }
 
@@ -99,12 +170,20 @@ const login = async (req, res) => {
     // Remove password from response
     delete user.password;
 
+    // Set httpOnly cookie for security
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+
     res.status(200).json({
       success: true,
       message: 'Login successful',
       data: {
         user,
-        token,
+        token, // Also send in response for frontend flexibility
       },
     });
   } catch (error) {
@@ -116,10 +195,40 @@ const login = async (req, res) => {
   }
 };
 
+// Logout
+const logout = async (req, res) => {
+  try {
+    // Clear the cookie
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully',
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Logout failed',
+    });
+  }
+};
+
 // Get current user
 const getCurrentUser = async (req, res) => {
   try {
     const user = await userService.findUserById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -134,22 +243,29 @@ const getCurrentUser = async (req, res) => {
   }
 };
 
-// Google OAuth callback
+// Google OAuth callback - SECURED VERSION
 const googleCallback = async (req, res) => {
   try {
     if (!req.user) {
-      console.error('No user data received from Google');
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('No user data received from Google');
+      }
       return res.redirect(`${process.env.FRONTEND_URL}?error=auth_failed`);
     }
-
-    console.log('✅ Google auth successful for user:', req.user.email);
 
     // Generate token
     const token = generateToken({ userId: req.user.id, email: req.user.email });
 
-    // Redirect to frontend with token in URL
-    const redirectUrl = `${process.env.FRONTEND_URL}?token=${token}`;
-    res.redirect(redirectUrl);
+    // Set httpOnly cookie (SECURE - not in URL!)
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax', // 'lax' for OAuth redirects, 'strict' for same-site only
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+
+    // Redirect without token in URL
+    res.redirect(`${process.env.FRONTEND_URL}/auth/success`);
     
   } catch (error) {
     console.error('Google callback error:', error);
@@ -163,33 +279,24 @@ const checkUsername = async (req, res) => {
   try {
     const { username } = req.params;
     
-    console.log('=== USERNAME CHECK START ===');
-    console.log('Raw params:', req.params);
-    console.log('Username received:', username);
-    console.log('Username type:', typeof username);
-    console.log('Username length:', username?.length);
-    
     // Validate username format
-    if (!username || username.length < 3) {
-      console.log('Username validation failed - too short');
+    if (!username || username.length < 3 || username.length > 20) {
+      return res.json({ exists: false });
+    }
+
+    if (!USERNAME_REGEX.test(username)) {
       return res.json({ exists: false });
     }
     
     // Check if username exists in database
-    console.log('Querying database for username:', username);
     const existingUser = await userService.findUserByUsername(username);
-    
-    console.log('Database query completed');
-    console.log('Result:', JSON.stringify(existingUser, null, 2));
-    console.log('User exists?:', !!existingUser);
-    console.log('=== USERNAME CHECK END ===');
     
     res.json({ exists: !!existingUser });
   } catch (error) {
-    console.error('=== ERROR IN USERNAME CHECK ===');
-    console.error('Error:', error);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
+    // Don't log sensitive info in production
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Username check error:', error);
+    }
     res.json({ exists: false });
   }
 };
@@ -199,34 +306,20 @@ const checkEmail = async (req, res) => {
   try {
     const { email } = req.params;
     
-    console.log('=== EMAIL CHECK START ===');
-    console.log('Raw params:', req.params);
-    console.log('Email received:', email);
-    console.log('Email type:', typeof email);
-    console.log('Email length:', email?.length);
-    
     // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email || !emailRegex.test(email)) {
-      console.log('Email validation failed - invalid format');
+    if (!email || !EMAIL_REGEX.test(email)) {
       return res.json({ exists: false });
     }
     
     // Check if email exists in database
-    console.log('Querying database for email:', email);
     const existingUser = await userService.findUserByEmail(email);
-    
-    console.log('Database query completed');
-    console.log('Result:', JSON.stringify(existingUser, null, 2));
-    console.log('User exists?:', !!existingUser);
-    console.log('=== EMAIL CHECK END ===');
     
     res.json({ exists: !!existingUser });
   } catch (error) {
-    console.error('=== ERROR IN EMAIL CHECK ===');
-    console.error('Error:', error);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
+    // Don't log sensitive info in production
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Email check error:', error);
+    }
     res.json({ exists: false });
   }
 };
@@ -234,6 +327,7 @@ const checkEmail = async (req, res) => {
 module.exports = {
   signup,
   login,
+  logout,
   getCurrentUser,
   googleCallback,
   checkUsername,

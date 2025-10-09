@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, X, Trophy, Swords, Users, LogOut, User, Award, Code } from 'lucide-react';
+import { Menu, X, Trophy, Swords, Users, LogOut, User, Award, Code, Flag } from 'lucide-react';
 import { getRatingColor, getRatingBadge } from '../utils/constants';
 
 export default function Navbar({ user, view, setView, onLogout }) {
@@ -11,6 +11,7 @@ export default function Navbar({ user, view, setView, onLogout }) {
     { id: 'duel', label: 'Duel Mode', icon: Swords },
     { id: 'leaderboard', label: 'Leaderboard', icon: Award },
     { id: 'profile', label: 'Profile', icon: User },
+    { id: 'report-issues', label: 'Report Issues', icon: Flag },
   ];
 
   return (
