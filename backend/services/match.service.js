@@ -1,7 +1,7 @@
 const prisma = require('../config/database.config');
 const { formatProblemId } = require('../utils/helpers.util');
 
-// Create new match
+// Create new match with endTime calculated at creation
 const createMatch = async (player1Id, player2Id, problem, duration) => {
   const player1 = await prisma.user.findUnique({ where: { id: player1Id } });
   const player2 = await prisma.user.findUnique({ where: { id: player2Id } });
@@ -14,6 +14,10 @@ const createMatch = async (player1Id, player2Id, problem, duration) => {
     throw new Error('Both players must have Codeforces handles');
   }
 
+  // Calculate endTime when match is created (INDUSTRY STANDARD)
+  const startTime = new Date();
+  const endTime = new Date(startTime.getTime() + duration * 60 * 1000);
+
   const match = await prisma.match.create({
     data: {
       player1Id,
@@ -24,6 +28,8 @@ const createMatch = async (player1Id, player2Id, problem, duration) => {
       problemTags: problem.tags,
       duration,
       status: 'active',
+      startTime,
+      endTime, // Set endTime immediately when match starts!
       player1RatingBefore: player1.rating,
       player2RatingBefore: player2.rating,
       player1Attempts: 0,
@@ -48,8 +54,6 @@ const createMatch = async (player1Id, player2Id, problem, duration) => {
       },
     },
   });
-
- 
 
   return match;
 };
@@ -146,7 +150,7 @@ const addSubmission = async (matchId, playerId, submissionData) => {
   return updatedMatch;
 };
 
-// Complete match
+// Complete match - DON'T override endTime (it's already set!)
 const completeMatch = async (matchId, winnerId, player1RatingChange, player2RatingChange) => {
   const match = await prisma.match.findUnique({
     where: { id: matchId },
@@ -161,15 +165,13 @@ const completeMatch = async (matchId, winnerId, player1RatingChange, player2Rati
     data: {
       status: 'completed',
       winnerId,
-      endTime: new Date(),
+      // Don't set endTime here - it's already set when match started!
       player1RatingAfter: match.player1RatingBefore + player1RatingChange,
       player1RatingChange,
       player2RatingAfter: match.player2RatingBefore + player2RatingChange,
       player2RatingChange,
     },
   });
-
-  
 
   return updatedMatch;
 };
@@ -210,14 +212,18 @@ const getMatchHistory = async (userId, limit = 20, offset = 0) => {
   return matches;
 };
 
-// Check if match time expired - FIXED
+// SIMPLIFIED: Check if match expired using endTime (single source of truth)
 const isMatchExpired = (match) => {
-  const now = Date.now();
-  const startTime = new Date(match.startTime).getTime();
-  const durationMs = match.duration * 60 * 1000; // Convert minutes to milliseconds
-  const elapsed = now - startTime;
+  if (!match.endTime) {
+    // Fallback for old matches without endTime
+    const now = Date.now();
+    const startTime = new Date(match.startTime).getTime();
+    const durationMs = match.duration * 60 * 1000;
+    return (now - startTime) >= durationMs;
+  }
   
-  return elapsed >= durationMs;
+  // New way: just compare current time with endTime
+  return new Date() > new Date(match.endTime);
 };
 
 // Update match attempts for both players

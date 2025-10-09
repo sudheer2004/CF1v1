@@ -664,7 +664,9 @@ const initializeSocket = (io) => {
         // Notify opponent
         const opponentId =
           match.player1Id === socket.userId ? match.player2Id : match.player1Id;
-        io.emit(`draw-offered-${matchId}`, { userId: socket.userId });
+       io.to(`user-${opponentId}`).emit(`draw-offered-${matchId}`, { 
+  offeredBy: socket.userId 
+});
 
       
 

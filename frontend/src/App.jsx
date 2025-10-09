@@ -11,6 +11,11 @@ import ReportIssues from './components/ReportIssues';
 import api from './services/api.service';
 import socketService from './services/socket.service';
 
+const isDev = import.meta.env.MODE === 'development';
+const devLog = (...args) => {
+  if (isDev) console.log(...args);
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('login');
@@ -23,7 +28,6 @@ export default function App() {
   const [matchAttempts, setMatchAttempts] = useState({ player1: 0, player2: 0 });
   const [error, setError] = useState(null);
 
-  const timerIntervalRef = useRef(null);
   const matchEndHandledRef = useRef(false);
 
   // Check authentication on mount
@@ -39,8 +43,6 @@ export default function App() {
       const authError = urlParams.get('error');
 
       if (token) {
-      
-        
         localStorage.setItem('token', token);
         window.history.replaceState({}, document.title, window.location.pathname);
         
@@ -50,30 +52,21 @@ export default function App() {
           
           try {
             const matchResponse = await api.getActiveMatch();
-            if (matchResponse.match && matchResponse.remainingTime > 0) {
-            
-              
-              const now = Date.now();
-              const remainingMs = matchResponse.remainingTime * 1000;
-              const totalDuration = matchResponse.match.duration * 60;
-              const elapsed = totalDuration - matchResponse.remainingTime;
+            if (matchResponse.match && matchResponse.match.endTime) {
+              devLog('📥 OAuth: Restored match with endTime:', matchResponse.match.endTime);
               
               setActiveMatch({
                 match: matchResponse.match,
                 opponent: matchResponse.opponent,
                 problemUrl: matchResponse.problemUrl,
-                matchKey: `${matchResponse.match.id}-oauth-${Date.now()}`,
-                serverStartTime: now - (elapsed * 1000),
-                serverDuration: totalDuration,
               });
-              setMatchTimer(matchResponse.remainingTime);
               setMatchAttempts(matchResponse.attempts);
               setView('matchmaking');
             } else {
               setView('dashboard');
             }
           } catch (err) {
-          
+            devLog('⚠️ OAuth: No active match found');
             setView('dashboard');
           }
           
@@ -95,19 +88,16 @@ export default function App() {
     handleOAuthCallback();
   }, []);
 
-  // Initialize socket connection when user is authenticated
+  // Initialize socket connection
   useEffect(() => {
     const initializeSocket = async () => {
       const token = localStorage.getItem('token');
       if (!token || !user) {
-      
         setSocketReady(false);
         return;
       }
 
       try {
-      
-        
         const newSocket = socketService.connect();
         setSocket(newSocket);
         
@@ -130,36 +120,27 @@ export default function App() {
         });
 
         await waitForConnection;
-       
-        
         await socketService.authenticate(token);
-       
-        
         setSocketReady(true);
         
         newSocket.on('disconnect', (reason) => {
-         
           setSocketReady(false);
-          
           if (reason === 'io server disconnect') {
-          
             newSocket.connect();
           }
         });
 
         newSocket.on('connect', () => {
-       
           socketService.authenticate(token).then(() => {
-          
             setSocketReady(true);
           }).catch(err => {
-            console.error('❌ Re-authentication failed:', err);
+            console.error('Re-authentication failed:', err);
             setSocketReady(false);
           });
         });
 
       } catch (error) {
-        console.error('❌ Socket initialization error:', error);
+        console.error('Socket initialization error:', error);
         setError('Failed to connect to server. Please refresh the page.');
         setSocketReady(false);
       }
@@ -168,51 +149,38 @@ export default function App() {
     initializeSocket();
   }, [user]);
 
-  // Monitor socket connection status periodically
+  // Monitor socket connection status
   useEffect(() => {
     if (!user) return;
 
     const checkInterval = setInterval(() => {
       const isConnected = socketService.isConnected();
       const isAuthenticated = socketService.isAuthenticated();
-      
       setSocketReady(isConnected && isAuthenticated);
-      
-     
     }, 3000);
 
     return () => clearInterval(checkInterval);
   }, [user]);
 
-  // FALLBACK: Poll for active match if waiting in queue/duel for too long
+  // Poll for active match (fallback)
   useEffect(() => {
     if (!user || activeMatch || matchResult) return;
-
     if (view !== 'matchmaking' && view !== 'duel') return;
-
-
     
     const pollInterval = setInterval(async () => {
       try {
         const matchResponse = await api.getActiveMatch();
         
-        if (matchResponse.match && matchResponse.remainingTime > 0) {
-       
-          
-          const now = Date.now();
-          const totalDuration = matchResponse.match.duration * 60;
-          const elapsed = totalDuration - matchResponse.remainingTime;
+        // ✅ NEW: Check for endTime instead of remainingTime
+        if (matchResponse.match && matchResponse.match.endTime) {
+          devLog('📥 Poll: Found active match with endTime:', matchResponse.match.endTime);
           
           setActiveMatch({
             match: matchResponse.match,
             opponent: matchResponse.opponent,
             problemUrl: matchResponse.problemUrl,
-            matchKey: `${matchResponse.match.id}-fallback-${Date.now()}`,
-            serverStartTime: now - (elapsed * 1000),
-            serverDuration: totalDuration,
           });
           
-          setMatchTimer(matchResponse.remainingTime);
           setMatchAttempts(matchResponse.attempts);
           
           if (view !== 'matchmaking' && view !== 'duel') {
@@ -220,84 +188,55 @@ export default function App() {
           }
         }
       } catch (err) {
-        // No active match found, which is fine
+        // No active match
       }
     }, 5000);
 
-    return () => {
-    
-      clearInterval(pollInterval);
-    };
+    return () => clearInterval(pollInterval);
   }, [user, activeMatch, matchResult, view]);
 
   // ============================================
-  // SERVER-SYNCED TIMER WITH DEBUG LOGGING
+  // 🔥 INDUSTRY STANDARD TIMER (endTime-based)
   // ============================================
   useEffect(() => {
-    // Clear any existing timer first
-    if (timerIntervalRef.current) {
-    
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = null;
-    }
-
-    // Only start timer if we have an active match with server timestamps
-    if (!activeMatch || !activeMatch.serverStartTime || !activeMatch.serverDuration) {
-    
+    if (!activeMatch?.match?.endTime) {
+      setMatchTimer(0);
       return;
     }
 
-
-    
     matchEndHandledRef.current = false;
 
-    // Function to calculate remaining time
-    const calculateRemainingTime = () => {
+    // Calculate remaining time from server's endTime
+    const calculateRemaining = () => {
       const now = Date.now();
-      const elapsed = Math.floor((now - activeMatch.serverStartTime) / 1000);
-      const remaining = Math.max(0, activeMatch.serverDuration - elapsed);
-      
-      return { remaining, elapsed, now };
+      const remaining = Math.max(0, Math.floor((activeMatch.match.endTime - now) / 1000));
+      return remaining;
     };
 
     // Set initial timer
-    const { remaining: initialRemaining, elapsed: initialElapsed, now: initialNow } = calculateRemainingTime();
-   
-    setMatchTimer(initialRemaining);
+    setMatchTimer(calculateRemaining());
+    
+    devLog(`🎬 Timer started - endTime: ${activeMatch.match.endTime}`);
 
-    // Start interval with debug logging for first 10 ticks
-    let tickCount = 0;
-    timerIntervalRef.current = setInterval(() => {
-      const { remaining, elapsed } = calculateRemainingTime();
-      
-      tickCount++;
-      
-     
-      
+    // Update every second
+    const interval = setInterval(() => {
+      const remaining = calculateRemaining();
       setMatchTimer(remaining);
     }, 1000);
 
-    // Cleanup
-    return () => {
-      if (timerIntervalRef.current) {
-      
-        clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      }
-    };
-  }, [activeMatch?.matchKey]);
+    return () => clearInterval(interval);
+  }, [activeMatch?.match?.endTime]);
 
-  // Handle timer expiry - SEPARATE from timer itself
+  // Handle timer expiry
   useEffect(() => {
     if (!activeMatch || matchResult || matchEndHandledRef.current) return;
     
     if (matchTimer === 0) {
-     
       matchEndHandledRef.current = true;
       
+      devLog('⏱️ Timer expired');
+      
       const timeoutId = setTimeout(() => {
-       
-        
         setMatchResult({
           won: false,
           draw: true,
@@ -323,56 +262,26 @@ export default function App() {
     }
   }, [matchTimer, activeMatch, matchResult, user]);
 
-  // Periodic sync with server to ensure timer accuracy
+  // Sync attempts periodically (no timer syncing needed!)
   useEffect(() => {
     if (!activeMatch || !user) return;
-
-  
 
     const syncInterval = setInterval(async () => {
       try {
         const matchResponse = await api.getActiveMatch();
         
         if (matchResponse.match && matchResponse.match.id === activeMatch.match.id) {
-          const serverRemaining = matchResponse.remainingTime;
-          const clientRemaining = matchTimer;
-          const drift = Math.abs(serverRemaining - clientRemaining);
-          
-          if (drift > 5) {
-           
-            
-            // Update activeMatch with corrected timestamps
-            setActiveMatch(prev => {
-              const now = Date.now();
-              const duration = matchResponse.match.duration * 60;
-              const elapsed = duration - serverRemaining;
-              const correctedStartTime = now - (elapsed * 1000);
-              
-              return {
-                ...prev,
-                serverStartTime: correctedStartTime,
-                serverDuration: duration,
-                matchKey: `${prev.match.id}-synced-${Date.now()}`,
-              };
-            });
-            
-           
-          }
-          
-          // Update attempts
+          // Only update attempts, timer handles itself via endTime
           setMatchAttempts(matchResponse.attempts);
-        } else if (!matchResponse.match) {
-         
+          
+          devLog('🔄 Synced attempts:', matchResponse.attempts);
         }
       } catch (err) {
-       
+        // Ignore sync errors
       }
-    }, 15000);
+    }, 20000);
 
-    return () => {
-     
-      clearInterval(syncInterval);
-    };
+    return () => clearInterval(syncInterval);
   }, [activeMatch?.match?.id, user]);
 
   const checkAuth = async () => {
@@ -384,37 +293,24 @@ export default function App() {
         
         try {
           const matchResponse = await api.getActiveMatch();
-          if (matchResponse.match) {
-            const matchData = matchResponse;
+          
+          // ✅ NEW: Check for endTime instead of remainingTime
+          if (matchResponse.match && matchResponse.match.endTime) {
+            devLog('📥 Auth: Restored match with endTime:', matchResponse.match.endTime);
             
-            if (matchData.remainingTime <= 0) {
-             
-              setView('dashboard');
-            } else {
-              
-              
-              const now = Date.now();
-              const totalDuration = matchData.match.duration * 60;
-              const elapsed = totalDuration - matchData.remainingTime;
-              
-              setActiveMatch({
-                match: matchData.match,
-                opponent: matchData.opponent,
-                problemUrl: matchData.problemUrl,
-                matchKey: `${matchData.match.id}-restored-${Date.now()}`,
-                serverStartTime: now - (elapsed * 1000),
-                serverDuration: totalDuration,
-              });
-              
-              setMatchTimer(matchData.remainingTime);
-              setMatchAttempts(matchData.attempts);
-              setView('matchmaking');
-            }
+            setActiveMatch({
+              match: matchResponse.match,
+              opponent: matchResponse.opponent,
+              problemUrl: matchResponse.problemUrl,
+            });
+            
+            setMatchAttempts(matchResponse.attempts);
+            setView('matchmaking');
           } else {
             setView('dashboard');
           }
         } catch (err) {
-        
+          devLog('⚠️ Auth: No active match found');
           setView('dashboard');
         }
       } catch (err) {
@@ -425,12 +321,6 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    // Clean up timer
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = null;
-    }
-
     if (socket) {
       socketService.disconnect();
       setSocket(null);

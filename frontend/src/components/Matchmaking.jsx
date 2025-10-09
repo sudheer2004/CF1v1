@@ -7,7 +7,7 @@ import MatchResultView from './MatchResultView';
 import MatchSettingsForm, { isFormValid } from './MatchSettingsForm';
 
 export default function Matchmaking({
-  user, socket, activeMatch, setActiveMatch,
+  user, socket, socketReady, activeMatch, setActiveMatch,
   matchResult, setMatchResult, matchTimer, setMatchTimer,
   matchAttempts, setMatchAttempts
 }) {
@@ -24,6 +24,7 @@ export default function Matchmaking({
   const [isAcceptingDraw, setIsAcceptingDraw] = useState(false);
 
   const listenersRegistered = useRef(false);
+  const queueStartTime = useRef(null);
 
   // Use shared match manager hook
   const {
@@ -48,7 +49,6 @@ export default function Matchmaking({
 
   // Enhanced accept draw handler with loading state
   const handleAcceptDraw = () => {
-  
     setIsAcceptingDraw(true);
     originalHandleAcceptDraw();
   };
@@ -56,7 +56,6 @@ export default function Matchmaking({
   // Reset loading state when match result is set
   useEffect(() => {
     if (matchResult) {
-
       setIsAcceptingDraw(false);
     }
   }, [matchResult]);
@@ -64,7 +63,6 @@ export default function Matchmaking({
   // Reset loading state when active match is cleared
   useEffect(() => {
     if (!activeMatch) {
-
       setIsAcceptingDraw(false);
     }
   }, [activeMatch]);
@@ -76,28 +74,40 @@ export default function Matchmaking({
     const handleQueueJoined = () => {
       setInQueue(true);
       setIsJoiningQueue(false);
+      queueStartTime.current = Date.now();
       setError('');
     };
 
     const handleMatchFound = (data) => {
+      console.log('🎮 Match found:', data);
       setInQueue(false);
       setIsJoiningQueue(false);
+      queueStartTime.current = null;
+      setQueueTime(0);
       
-      const matchDuration = data.match.duration * 60;
-      const now = Date.now();
+      // Validate that endTime exists before setting active match
+      if (!data.match?.endTime) {
+        console.error('❌ Match found but missing endTime:', data);
+        setError('Invalid match data received. Please try again.');
+        return;
+      }
+      
+      // Convert endTime to timestamp if it's not already
+      const endTimeMs = typeof data.match.endTime === 'number' 
+        ? data.match.endTime 
+        : new Date(data.match.endTime).getTime();
+      
+      console.log('✅ Setting active match with endTime:', endTimeMs);
+      
       setActiveMatch({
         ...data,
-        matchKey: `${data.match.id}-${Date.now()}`,
-        serverStartTime: now,
-        serverDuration: matchDuration,
+        match: {
+          ...data.match,
+          endTime: endTimeMs
+        }
       });
-      
-
-      setMatchTimer(matchDuration);
       setMatchResult(null);
       setMatchAttempts({ player1: 0, player2: 0 });
-      
-
     };
 
     const handleError = (err) => {
@@ -106,6 +116,8 @@ export default function Matchmaking({
       setInQueue(false);
       setIsJoiningQueue(false);
       setIsAcceptingDraw(false);
+      queueStartTime.current = null;
+      setQueueTime(0);
     };
 
     socketService.on('queue-joined', handleQueueJoined);
@@ -115,30 +127,47 @@ export default function Matchmaking({
     listenersRegistered.current = true;
 
     return () => {
-
       socketService.off('queue-joined', handleQueueJoined);
       socketService.off('match-found', handleMatchFound);
       socketService.off('error', handleError);
       listenersRegistered.current = false;
     };
-  }, [socket, setActiveMatch, setMatchResult, setMatchTimer, setMatchAttempts]);
+  }, [socket, setActiveMatch, setMatchResult, setMatchAttempts]);
 
-  // Queue timer
+  // Enhanced queue timer with more accurate tracking
   useEffect(() => {
     let interval;
-    if (inQueue) {
+    if (inQueue && queueStartTime.current) {
       interval = setInterval(() => {
-        setQueueTime((t) => t + 1);
+        const elapsed = Math.floor((Date.now() - queueStartTime.current) / 1000);
+        setQueueTime(elapsed);
       }, 1000);
-    } else {
+    } else if (!inQueue) {
       setQueueTime(0);
+      queueStartTime.current = null;
     }
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [inQueue]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (inQueue) {
+        socketService.leaveMatchmaking();
+      }
+    };
   }, [inQueue]);
 
   const handleJoinQueue = () => {
     if (!user.cfHandle) {
       setError('Please add your Codeforces handle in Profile before matchmaking');
+      return;
+    }
+
+    if (!socketReady) {
+      setError('Connection to server not ready. Please wait...');
       return;
     }
 
@@ -152,6 +181,11 @@ export default function Matchmaking({
       return;
     }
 
+    if (!isFormValid(formData)) {
+      setError('Please check your match settings');
+      return;
+    }
+
     setIsJoiningQueue(true);
     setError('');
     socketService.joinMatchmaking(formData);
@@ -161,12 +195,16 @@ export default function Matchmaking({
     socketService.leaveMatchmaking();
     setInQueue(false);
     setQueueTime(0);
+    queueStartTime.current = null;
+    setIsJoiningQueue(false);
   };
 
   const handleNewMatch = () => {
     resetMatch();
     setError('');
     setIsAcceptingDraw(false);
+    setQueueTime(0);
+    queueStartTime.current = null;
   };
 
   const formatTime = (seconds) => {
@@ -251,15 +289,22 @@ export default function Matchmaking({
           </div>
         )}
 
+        {!socketReady && (
+          <div className="mb-6 p-4 bg-yellow-500/20 border border-yellow-500/50 rounded-lg flex items-start space-x-3">
+            <Loader className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5 animate-spin" />
+            <p className="text-yellow-300">Connecting to server...</p>
+          </div>
+        )}
+
         <MatchSettingsForm
           formData={formData}
           setFormData={setFormData}
-          disabled={isJoiningQueue}
+          disabled={isJoiningQueue || !socketReady}
         />
 
         <button
           onClick={handleJoinQueue}
-          disabled={!user.cfHandle || !isFormValid(formData) || isJoiningQueue || activeMatch}
+          disabled={!user.cfHandle || !isFormValid(formData) || isJoiningQueue || activeMatch || !socketReady}
           className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition flex items-center justify-center space-x-2"
         >
           {isJoiningQueue ? (
@@ -267,12 +312,20 @@ export default function Matchmaking({
               <Loader className="w-5 h-5 animate-spin" />
               <span>Joining Queue...</span>
             </>
+          ) : !socketReady ? (
+            <>
+              <Loader className="w-5 h-5 animate-spin" />
+              <span>Connecting...</span>
+            </>
           ) : activeMatch ? (
             <span>Complete Current Match First</span>
           ) : !isFormValid(formData) ? (
             <span>Invalid Settings</span>
           ) : (
-            <span>{!user.cfHandle ? 'Add CF Handle First' : 'Join Queue'}</span>
+            <>
+              <Users className="w-5 h-5" />
+              <span>{!user.cfHandle ? 'Add CF Handle First' : 'Join Queue'}</span>
+            </>
           )}
         </button>
       </div>

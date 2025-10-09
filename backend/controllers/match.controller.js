@@ -2,52 +2,38 @@ const matchService = require('../services/match.service');
 const userService = require('../services/user.service');
 const { getCodeforcesUrl } = require('../utils/helpers.util');
 
+const isDev = process.env.NODE_ENV === 'development';
+const devLog = (...args) => {
+  if (isDev) console.log('[DEV]', ...args);
+};
+
 exports.getActiveMatch = async (req, res) => {
   try {
     const userId = req.user.id;
     
-    
     // Get active match for user
     const match = await matchService.getActiveMatchByUserId(userId);
    
-    
     if (!match) {
       return res.json({ match: null });
     }
     
-   
-    
-    // CRITICAL: Check if match is expired
-    const isExpired = matchService.isMatchExpired(match);
-  
-    
-    if (isExpired) {
-    
-      // Don't return expired matches - let the polling handle cleanup
-      return res.json({ match: null });
+    // SIMPLIFIED: Check expiry using endTime (single source of truth)
+    if (!match.endTime) {
+      devLog('⚠️ Match missing endTime, using fallback check');
     }
     
-    // Calculate elapsed time and remaining time
-    const startedAt = new Date(match.startTime);
-    const elapsedSeconds = Math.floor((Date.now() - startedAt.getTime()) / 1000);
-    const totalDuration = match.duration * 60;
-    const remainingTime = Math.max(0, totalDuration - elapsedSeconds);
-    
-
-    
-    // Additional safety check
-    if (remainingTime <= 0) {
-   
+    const isExpired = matchService.isMatchExpired(match);
+  
+    if (isExpired) {
+      devLog(`⏱️ Match ${match.id} expired, not returning to client`);
       return res.json({ match: null });
     }
     
     // Get opponent info
     const opponentId = match.player1Id === userId ? match.player2Id : match.player1Id;
-
-    
     const opponent = await userService.findUserById(opponentId);
 
-    
     if (!opponent) {
       throw new Error('Opponent not found');
     }
@@ -59,11 +45,13 @@ exports.getActiveMatch = async (req, res) => {
     };
     
     // Parse problem ID to get contestId and index
-
     const [contestId, index] = match.problemId.split('-');
     const problemUrl = getCodeforcesUrl(parseInt(contestId), index);
     
-  
+    // CRITICAL: Send endTime as Unix timestamp (milliseconds)
+    const endTimeMs = match.endTime ? new Date(match.endTime).getTime() : null;
+    
+    devLog(`✅ Returning active match with endTime: ${endTimeMs}`);
     
     res.json({
       match: {
@@ -75,6 +63,7 @@ exports.getActiveMatch = async (req, res) => {
         problemRating: match.problemRating,
         duration: match.duration,
         startedAt: match.startTime,
+        endTime: endTimeMs, // Send endTime instead of remainingTime!
         status: match.status,
       },
       opponent: {
@@ -84,7 +73,6 @@ exports.getActiveMatch = async (req, res) => {
         rating: opponent.rating,
       },
       problemUrl,
-      remainingTime,
       attempts,
     });
   } catch (error) {

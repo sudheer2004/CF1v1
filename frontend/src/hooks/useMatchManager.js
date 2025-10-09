@@ -64,11 +64,14 @@ export default function useMatchManager({
     };
 
     const handleDrawOffered = (data) => {
-      setDrawOffered((prev) => ({ ...prev, byOpponent: true }));
-      setShowDrawNotification(true);
+  // Only process if the offer came from opponent, not from me
+  if (data.offeredBy && data.offeredBy !== user.id) {
+    setDrawOffered((prev) => ({ ...prev, byOpponent: true }));
+    setShowDrawNotification(true);
 
-      setTimeout(() => setShowDrawNotification(false), 5000);
-    };
+    setTimeout(() => setShowDrawNotification(false), 5000);
+  }
+};
 
     socketService.on(`match-update-${matchId}`, handleMatchUpdate);
     socketService.on(`match-end-${matchId}`, handleMatchEnd);
