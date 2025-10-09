@@ -12,8 +12,9 @@ router.post('/login', authLimiter, authController.login);
 router.post('/logout', authController.logout);
 
 // Check availability endpoints with separate rate limiting
-router.get('/check/username/:username', checkLimiter, authController.checkUsername);
-router.get('/check/email/:email', checkLimiter, authController.checkEmail);
+// FIXED: Changed from /check/username/ to /check-username/
+router.get('/check-username/:username', checkLimiter, authController.checkUsername);
+router.get('/check-email/:email', checkLimiter, authController.checkEmail);
 
 // Google OAuth routes
 router.get('/google',
