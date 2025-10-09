@@ -19,6 +19,7 @@ export default function DuelMode({
   const [isCreatingDuel, setIsCreatingDuel] = useState(false);
   const [isJoiningDuel, setIsJoiningDuel] = useState(false);
   const [waitingForMatch, setWaitingForMatch] = useState(false);
+  const [isAcceptingDraw, setIsAcceptingDraw] = useState(false); // ✅ Added
   const [formData, setFormData] = useState({
     ratingMin: 800,
     ratingMax: 1600,
@@ -35,7 +36,7 @@ export default function DuelMode({
     showDrawNotification,
     handleGiveUp,
     handleOfferDraw,
-    handleAcceptDraw,
+    handleAcceptDraw: originalHandleAcceptDraw,
     handleNewMatch: resetMatch,
   } = useMatchManager({
     user,
@@ -50,12 +51,31 @@ export default function DuelMode({
     setMatchAttempts,
   });
 
+  // ✅ Enhanced accept draw handler with loading state
+  const handleAcceptDraw = () => {
+    setIsAcceptingDraw(true);
+    originalHandleAcceptDraw();
+  };
+
+  // ✅ Reset loading state when match result is set
+  useEffect(() => {
+    if (matchResult) {
+      setIsAcceptingDraw(false);
+    }
+  }, [matchResult]);
+
+  // ✅ Reset loading state when active match is cleared
+  useEffect(() => {
+    if (!activeMatch) {
+      setIsAcceptingDraw(false);
+    }
+  }, [activeMatch]);
+
   // Setup duel-specific socket listeners
   useEffect(() => {
     if (!socket || listenersRegistered.current) return;
 
     const handleDuelCreated = (data) => {
-      
       if (currentDuelCode.current !== data.duel.duelCode) {
         currentDuelCode.current = data.duel.duelCode;
         setDuel(data.duel);
@@ -67,7 +87,7 @@ export default function DuelMode({
     };
 
     const handleMatchFound = (data) => {
-      
+      console.log('🎮 DUEL: Match found:', data);
       setWaitingForMatch(false);
       setDuel(null);
       currentDuelCode.current = null;
@@ -75,24 +95,34 @@ export default function DuelMode({
       setIsJoiningDuel(false);
       setIsCreatingDuel(false);
       
-      const matchDuration = data.match.duration * 60;
+      // ✅ FIXED: Use endTime from server (industry standard)
+      // Validate that endTime exists
+      if (!data.match?.endTime) {
+        console.error('❌ DUEL: Match found but missing endTime:', data);
+        setError('Invalid match data received. Please try again.');
+        return;
+      }
       
-      // ✅ FIXED: Use CLIENT time, not server startedAt
-      // This prevents the 10-second freeze issue
-      const now = Date.now();
+      // Convert endTime to timestamp if it's not already
+      const endTimeMs = typeof data.match.endTime === 'number' 
+        ? data.match.endTime 
+        : new Date(data.match.endTime).getTime();
       
+      console.log('✅ DUEL: Setting endTime:', endTimeMs);
+      
+      // ✅ Use the SAME format as Matchmaking
       setActiveMatch({
         ...data,
-        matchKey: `${data.match.id}-duel-${Date.now()}`,
-        serverStartTime: now, // Use current client time as start
-        serverDuration: matchDuration,
+        match: {
+          ...data.match,
+          endTime: endTimeMs  // This is what App.jsx timer uses!
+        }
       });
       
-      setMatchTimer(matchDuration);
       setMatchResult(null);
       setMatchAttempts({ player1: 0, player2: 0 });
       
-     
+      console.log('✅ DUEL: Match setup complete');
     };
 
     const handleError = (err) => {
@@ -101,6 +131,7 @@ export default function DuelMode({
       setIsCreatingDuel(false);
       setIsJoiningDuel(false);
       setWaitingForMatch(false);
+      setIsAcceptingDraw(false); // ✅ Reset loading state on error
     };
 
     socketService.on('duel-created', handleDuelCreated);
@@ -115,7 +146,7 @@ export default function DuelMode({
       socketService.off('error', handleError);
       listenersRegistered.current = false;
     };
-  }, [socket, setActiveMatch, setMatchResult, setMatchTimer, setMatchAttempts]);
+  }, [socket, setActiveMatch, setMatchResult, setMatchAttempts]);
 
   // Monitor when someone joins the duel
   useEffect(() => {
@@ -180,6 +211,7 @@ export default function DuelMode({
   const handleNewMatch = () => {
     resetMatch();
     setError('');
+    setIsAcceptingDraw(false); // ✅ Reset loading state
   };
 
   const handleCancelDuel = () => {
@@ -215,6 +247,7 @@ export default function DuelMode({
         onGiveUp={handleGiveUp}
         onOfferDraw={handleOfferDraw}
         onAcceptDraw={handleAcceptDraw}
+        isAcceptingDraw={isAcceptingDraw} // ✅ Pass loading state
         matchTitle="Duel in Progress"
       />
     );
