@@ -79,7 +79,7 @@ export default function Matchmaking({
     };
 
     const handleMatchFound = (data) => {
-      console.log('🎮 Match found:', data);
+     
       setInQueue(false);
       setIsJoiningQueue(false);
       queueStartTime.current = null;
@@ -97,7 +97,7 @@ export default function Matchmaking({
         ? data.match.endTime 
         : new Date(data.match.endTime).getTime();
       
-      console.log('✅ Setting active match with endTime:', endTimeMs);
+     
       
       setActiveMatch({
         ...data,
