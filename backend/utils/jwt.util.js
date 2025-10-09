@@ -69,7 +69,7 @@ const verifyToken = (token) => {
     
     if (error.name === 'NotBeforeError') {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('Token not yet valid');
+       
       }
       return null;
     }

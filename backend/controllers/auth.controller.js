@@ -244,6 +244,7 @@ const getCurrentUser = async (req, res) => {
 };
 
 // Google OAuth callback - SECURED VERSION
+// Google OAuth callback
 const googleCallback = async (req, res) => {
   try {
     if (!req.user) {
@@ -256,16 +257,8 @@ const googleCallback = async (req, res) => {
     // Generate token
     const token = generateToken({ userId: req.user.id, email: req.user.email });
 
-    // Set httpOnly cookie (SECURE - not in URL!)
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax', // 'lax' for OAuth redirects, 'strict' for same-site only
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    });
-
-    // Redirect without token in URL
-    res.redirect(`${process.env.FRONTEND_URL}/auth/success`);
+    // Redirect with token (frontend will save to localStorage)
+    res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
     
   } catch (error) {
     console.error('Google callback error:', error);
@@ -273,7 +266,6 @@ const googleCallback = async (req, res) => {
     res.redirect(errorUrl);
   }
 };
-
 // Check username availability
 const checkUsername = async (req, res) => {
   try {
