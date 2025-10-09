@@ -21,6 +21,7 @@ export default function Matchmaking({
   const [queueTime, setQueueTime] = useState(0);
   const [error, setError] = useState('');
   const [isJoiningQueue, setIsJoiningQueue] = useState(false);
+  const [isAcceptingDraw, setIsAcceptingDraw] = useState(false);
 
   const listenersRegistered = useRef(false);
 
@@ -30,7 +31,7 @@ export default function Matchmaking({
     showDrawNotification,
     handleGiveUp,
     handleOfferDraw,
-    handleAcceptDraw,
+    handleAcceptDraw: originalHandleAcceptDraw,
     handleNewMatch: resetMatch,
   } = useMatchManager({
     user,
@@ -44,6 +45,29 @@ export default function Matchmaking({
     matchAttempts,
     setMatchAttempts,
   });
+
+  // Enhanced accept draw handler with loading state
+  const handleAcceptDraw = () => {
+    console.log('🤝 Accept Draw clicked - setting loading state');
+    setIsAcceptingDraw(true);
+    originalHandleAcceptDraw();
+  };
+
+  // Reset loading state when match result is set
+  useEffect(() => {
+    if (matchResult) {
+      console.log('✅ Match result received - resetting accepting draw state');
+      setIsAcceptingDraw(false);
+    }
+  }, [matchResult]);
+
+  // Reset loading state when active match is cleared
+  useEffect(() => {
+    if (!activeMatch) {
+      console.log('🔄 Active match cleared - resetting accepting draw state');
+      setIsAcceptingDraw(false);
+    }
+  }, [activeMatch]);
 
   // Setup matchmaking-specific socket listeners
   useEffect(() => {
@@ -100,6 +124,7 @@ export default function Matchmaking({
       setError(err.message);
       setInQueue(false);
       setIsJoiningQueue(false);
+      setIsAcceptingDraw(false);
     };
 
     socketService.on('queue-joined', handleQueueJoined);
@@ -160,6 +185,7 @@ export default function Matchmaking({
   const handleNewMatch = () => {
     resetMatch();
     setError('');
+    setIsAcceptingDraw(false);
   };
 
   const formatTime = (seconds) => {
@@ -193,6 +219,7 @@ export default function Matchmaking({
         onGiveUp={handleGiveUp}
         onOfferDraw={handleOfferDraw}
         onAcceptDraw={handleAcceptDraw}
+        isAcceptingDraw={isAcceptingDraw}
         matchTitle="Match in Progress"
       />
     );

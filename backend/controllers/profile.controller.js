@@ -4,7 +4,12 @@ const matchService = require('../services/match.service');
 // Get user profile
 const getProfile = async (req, res) => {
   try {
-    const userId = req.params.userId || req.user.id;
+    // FIX: Check if userId is 'me' and replace with actual user ID
+    let userId = req.params.userId;
+    
+    if (userId === 'me') {
+      userId = req.user.id;
+    }
 
     const user = await userService.findUserById(userId);
 
@@ -60,7 +65,13 @@ const updateCfHandle = async (req, res) => {
 // Get match history
 const getMatchHistory = async (req, res) => {
   try {
-    const userId = req.params.userId || req.user.id;
+    // FIX: Check if userId is 'me' and replace with actual user ID
+    let userId = req.params.userId;
+    
+    if (userId === 'me') {
+      userId = req.user.id;
+    }
+    
     const limit = parseInt(req.query.limit) || 20;
     const offset = parseInt(req.query.offset) || 0;
 
