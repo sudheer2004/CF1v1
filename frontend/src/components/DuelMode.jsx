@@ -54,10 +54,7 @@ export default function DuelMode({
   useEffect(() => {
     if (!socket || listenersRegistered.current) return;
 
-    console.log('🎧 Setting up Duel Mode socket listeners');
-
     const handleDuelCreated = (data) => {
-      console.log('✅ Duel created event received:', data.duel.duelCode);
       
       if (currentDuelCode.current !== data.duel.duelCode) {
         currentDuelCode.current = data.duel.duelCode;
@@ -70,7 +67,6 @@ export default function DuelMode({
     };
 
     const handleMatchFound = (data) => {
-      console.log('🎮 Match found event received in DuelMode');
       
       setWaitingForMatch(false);
       setDuel(null);
@@ -96,7 +92,7 @@ export default function DuelMode({
       setMatchResult(null);
       setMatchAttempts({ player1: 0, player2: 0 });
       
-      console.log('✅ DuelMode: Match state updated - Timer will start immediately from:', matchDuration, 'seconds');
+     
     };
 
     const handleError = (err) => {
@@ -114,7 +110,6 @@ export default function DuelMode({
     listenersRegistered.current = true;
 
     return () => {
-      console.log('🧹 Cleaning up Duel Mode socket listeners');
       socketService.off('duel-created', handleDuelCreated);
       socketService.off('match-found', handleMatchFound);
       socketService.off('error', handleError);
@@ -125,12 +120,10 @@ export default function DuelMode({
   // Monitor when someone joins the duel
   useEffect(() => {
     if (mode === 'waiting' && duel) {
-      console.log('⏳ Waiting for opponent to join duel:', duel.duelCode);
       setWaitingForMatch(true);
       
       const timeout = setTimeout(() => {
         if (waitingForMatch) {
-          console.log('⚠️ Still waiting for match after 10 seconds');
           setError('Taking longer than expected. Please wait or try refreshing if this persists.');
         }
       }, 10000);

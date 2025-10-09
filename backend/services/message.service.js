@@ -3,13 +3,7 @@ const prisma = require('../config/database.config');
 class MessageService {
   async createMessage(matchId, senderId, senderName, content) {
     try {
-      console.log('📝 Creating message:', {
-        matchId,
-        senderId,
-        senderName,
-        contentLength: content?.length
-      });
-
+    
       // Validate inputs
       if (!matchId || !senderId || !senderName || !content) {
         throw new Error(`Missing required fields: matchId=${!!matchId}, senderId=${!!senderId}, senderName=${!!senderName}, content=${!!content}`);
@@ -24,7 +18,7 @@ class MessageService {
         },
       });
 
-      console.log('✅ Message created successfully:', message.id);
+     
       return message;
     } catch (error) {
       console.error('❌ Error creating message:', error);
@@ -40,14 +34,14 @@ class MessageService {
 
   async getMatchMessages(matchId) {
     try {
-      console.log('📨 Fetching messages for match:', matchId);
+     
       
       const messages = await prisma.message.findMany({
         where: { matchId },
         orderBy: { createdAt: 'asc' },
       });
 
-      console.log(`✅ Found ${messages.length} messages for match ${matchId}`);
+     
       return messages;
     } catch (error) {
       console.error('❌ Error fetching messages:', error);
@@ -61,7 +55,7 @@ class MessageService {
         where: { matchId },
       });
 
-      console.log(`🗑️ Deleted ${result.count} messages for match: ${matchId}`);
+    
       return result.count;
     } catch (error) {
       console.error('❌ Error deleting messages:', error);
@@ -84,10 +78,10 @@ class MessageService {
         },
       });
 
-      console.log(`🧹 Cleaned up ${result.count} old messages`);
+     
       return result.count;
     } catch (error) {
-      console.error('❌ Error cleaning up old messages:', error);
+      
       return 0;
     }
   }

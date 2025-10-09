@@ -108,7 +108,7 @@ const selectRandomProblem = async (ratingMin, ratingMax, tags, minYear = null) =
 
   // AUTOMATIC FALLBACK: If no problems match with year filter, retry without it
   if (problems.length === 0 && minYear !== null) {
-    console.log(`⚠️ No problems found for year ${minYear}+, falling back to any year...`);
+   
     problems = await getFilteredProblems(ratingMin, ratingMax, tags, null);
   }
 
@@ -122,7 +122,7 @@ const selectRandomProblem = async (ratingMin, ratingMax, tags, minYear = null) =
   // Log year info for debugging
   if (minYear !== null) {
     const estimatedYear = estimateProblemYear(selectedProblem.contestId);
-    console.log(`✅ Selected problem from contest ${selectedProblem.contestId} (estimated year: ${estimatedYear})`);
+   
   }
   
   return selectedProblem;

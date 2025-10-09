@@ -49,14 +49,7 @@ const createMatch = async (player1Id, player2Id, problem, duration) => {
     },
   });
 
-  console.log('✅ Match created successfully:', {
-    id: match.id,
-    status: match.status,
-    player1: match.player1.cfHandle,
-    player2: match.player2.cfHandle,
-    problem: match.problemId,
-    duration: match.duration,
-  });
+ 
 
   return match;
 };
@@ -176,12 +169,7 @@ const completeMatch = async (matchId, winnerId, player1RatingChange, player2Rati
     },
   });
 
-  console.log('✅ Match completed:', {
-    id: matchId,
-    winnerId,
-    player1Change: player1RatingChange,
-    player2Change: player2RatingChange,
-  });
+  
 
   return updatedMatch;
 };

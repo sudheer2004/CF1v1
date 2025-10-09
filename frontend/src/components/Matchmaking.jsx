@@ -48,7 +48,7 @@ export default function Matchmaking({
 
   // Enhanced accept draw handler with loading state
   const handleAcceptDraw = () => {
-    console.log('🤝 Accept Draw clicked - setting loading state');
+  
     setIsAcceptingDraw(true);
     originalHandleAcceptDraw();
   };
@@ -56,7 +56,7 @@ export default function Matchmaking({
   // Reset loading state when match result is set
   useEffect(() => {
     if (matchResult) {
-      console.log('✅ Match result received - resetting accepting draw state');
+
       setIsAcceptingDraw(false);
     }
   }, [matchResult]);
@@ -64,7 +64,7 @@ export default function Matchmaking({
   // Reset loading state when active match is cleared
   useEffect(() => {
     if (!activeMatch) {
-      console.log('🔄 Active match cleared - resetting accepting draw state');
+
       setIsAcceptingDraw(false);
     }
   }, [activeMatch]);
@@ -73,8 +73,6 @@ export default function Matchmaking({
   useEffect(() => {
     if (!socket || listenersRegistered.current) return;
 
-    console.log('🎧 Setting up Matchmaking socket listeners');
-
     const handleQueueJoined = () => {
       setInQueue(true);
       setIsJoiningQueue(false);
@@ -82,27 +80,11 @@ export default function Matchmaking({
     };
 
     const handleMatchFound = (data) => {
-      console.log('==========================================');
-      console.log('🎮 MATCH FOUND IN MATCHMAKING');
-      console.log('==========================================');
-      console.log('Raw match data:', JSON.stringify(data, null, 2));
-      console.log('Match startedAt from server:', data.match.startedAt);
-      console.log('Current client time:', new Date().toISOString());
-      console.log('Match duration (minutes):', data.match.duration);
-      
       setInQueue(false);
       setIsJoiningQueue(false);
       
       const matchDuration = data.match.duration * 60;
       const now = Date.now();
-      
-      console.log('📝 Setting active match with:');
-      console.log('   Client Now (ms):', now);
-      console.log('   Client Now (ISO):', new Date(now).toISOString());
-      console.log('   Duration (seconds):', matchDuration);
-      console.log('   Duration (minutes):', matchDuration / 60);
-      console.log('   matchKey:', `${data.match.id}-${Date.now()}`);
-      
       setActiveMatch({
         ...data,
         matchKey: `${data.match.id}-${Date.now()}`,
@@ -110,13 +92,12 @@ export default function Matchmaking({
         serverDuration: matchDuration,
       });
       
-      console.log('⏱️ Setting initial matchTimer to:', matchDuration, 'seconds');
+
       setMatchTimer(matchDuration);
       setMatchResult(null);
       setMatchAttempts({ player1: 0, player2: 0 });
       
-      console.log('✅ Match state set - timer should start immediately');
-      console.log('==========================================');
+
     };
 
     const handleError = (err) => {
@@ -134,7 +115,7 @@ export default function Matchmaking({
     listenersRegistered.current = true;
 
     return () => {
-      console.log('🧹 Cleaning up Matchmaking socket listeners');
+
       socketService.off('queue-joined', handleQueueJoined);
       socketService.off('match-found', handleMatchFound);
       socketService.off('error', handleError);

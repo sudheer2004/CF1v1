@@ -163,14 +163,7 @@ process.on('uncaughtException', (error) => {
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
-  console.log('\n🚀 ===== SERVER STARTED =====');
-  console.log(`📍 Port: ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔒 CORS enabled for: ${allowedOrigins.join(', ')}`);
-  console.log(`📡 Socket.io ready for connections`);
-  console.log(`⚡ Rate limiting: Auth routes only (allows real-time polling)`);
-  console.log(`⏰ Server time: ${new Date().toISOString()}`);
-  console.log('============================\n');
+ 
   
   // Warning if in development mode
   if (process.env.NODE_ENV !== 'production') {
@@ -181,18 +174,16 @@ server.listen(PORT, () => {
 
 // ===== GRACEFUL SHUTDOWN =====
 const gracefulShutdown = (signal) => {
-  console.log(`\n📥 Received ${signal}, starting graceful shutdown...`);
   
   server.close(() => {
-    console.log('✅ HTTP server closed');
+   
     
     // Close database connections
     // prisma.$disconnect() if using Prisma
     
     // Close socket connections
     io.close(() => {
-      console.log('✅ Socket.io connections closed');
-      console.log('👋 Shutdown complete');
+     
       process.exit(0);
     });
   });

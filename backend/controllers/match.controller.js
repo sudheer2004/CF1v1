@@ -5,28 +5,24 @@ const { getCodeforcesUrl } = require('../utils/helpers.util');
 exports.getActiveMatch = async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('Getting active match for user:', userId);
+    
     
     // Get active match for user
     const match = await matchService.getActiveMatchByUserId(userId);
-    console.log('Match found:', match ? 'Yes' : 'No');
+   
     
     if (!match) {
       return res.json({ match: null });
     }
     
-    console.log('Match details:', {
-      id: match.id,
-      startTime: match.startTime,
-      duration: match.duration
-    });
+   
     
     // CRITICAL: Check if match is expired
     const isExpired = matchService.isMatchExpired(match);
-    console.log('Match expired check:', isExpired);
+  
     
     if (isExpired) {
-      console.log('⏰ Match is expired, not returning it to client');
+    
       // Don't return expired matches - let the polling handle cleanup
       return res.json({ match: null });
     }
@@ -37,20 +33,20 @@ exports.getActiveMatch = async (req, res) => {
     const totalDuration = match.duration * 60;
     const remainingTime = Math.max(0, totalDuration - elapsedSeconds);
     
-    console.log('Time calculation:', { elapsedSeconds, totalDuration, remainingTime });
+
     
     // Additional safety check
     if (remainingTime <= 0) {
-      console.log('⏰ Remaining time is 0 or negative, not returning match');
+   
       return res.json({ match: null });
     }
     
     // Get opponent info
     const opponentId = match.player1Id === userId ? match.player2Id : match.player1Id;
-    console.log('Fetching opponent:', opponentId);
+
     
     const opponent = await userService.findUserById(opponentId);
-    console.log('Opponent found:', opponent ? 'Yes' : 'No');
+
     
     if (!opponent) {
       throw new Error('Opponent not found');
@@ -63,11 +59,11 @@ exports.getActiveMatch = async (req, res) => {
     };
     
     // Parse problem ID to get contestId and index
-    console.log('Parsing problem ID:', match.problemId);
+
     const [contestId, index] = match.problemId.split('-');
     const problemUrl = getCodeforcesUrl(parseInt(contestId), index);
     
-    console.log('Sending response with', remainingTime, 'seconds remaining');
+  
     
     res.json({
       match: {
