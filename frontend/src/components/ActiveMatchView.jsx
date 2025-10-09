@@ -1,5 +1,6 @@
 import React from 'react';
 import { Timer, ExternalLink, Loader } from 'lucide-react';
+import ChatBubble from './ChatBubble';
 
 /**
  * Shared component to display active match
@@ -163,10 +164,11 @@ export default function ActiveMatchView({
         </div>
       </div>
 
-      {/* Chat Bubble - assuming this component exists */}
-      <div className="mt-4 text-center text-gray-500 text-sm">
-        Chat component would go here
-      </div>
+      {/* Chat Bubble - Fully Integrated */}
+      <ChatBubble 
+        matchId={activeMatch.match.id}
+        user={user}
+      />
     </>
   );
 }
