@@ -53,11 +53,11 @@ export default function ChatBubble({ matchId, user, isOpen: externalIsOpen, onTo
 
     const loadMessages = () => {
       if (!socketService.isConnected() || !socketService.isAuthenticated()) {
-        console.log('⏳ Waiting for socket connection...');
+      
         return false;
       }
 
-      console.log('📨 Loading messages for match:', matchId);
+    
       setLoading(true);
       socketService.emit('get-match-messages', { matchId });
       return true;
@@ -87,14 +87,14 @@ export default function ChatBubble({ matchId, user, isOpen: externalIsOpen, onTo
     if (!matchId || messageListenersRegistered.current) return;
 
     const handleMessagesLoaded = (data) => {
-      console.log('📬 Messages loaded:', data.messages.length);
+    
       setMessages(data.messages);
       setLoading(false);
       setTimeout(scrollToBottom, 100);
     };
 
     const handleNewMessage = (data) => {
-      console.log('💬 New message received:', data.message);
+     
       setMessages(prev => [...prev, data.message]);
       
       if (!chatIsOpen && data.message.senderId !== user.id) {
@@ -102,7 +102,7 @@ export default function ChatBubble({ matchId, user, isOpen: externalIsOpen, onTo
         
         if (notificationSound.current) {
           notificationSound.current.play().catch(err => {
-            console.log('Could not play notification sound:', err);
+            console.log(err);
           });
         }
       }
@@ -155,7 +155,7 @@ export default function ChatBubble({ matchId, user, isOpen: externalIsOpen, onTo
       return;
     }
 
-    console.log('📤 Sending message:', newMessage.trim());
+
     
     try {
       socketService.emit('send-message', {
