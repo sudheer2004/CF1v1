@@ -174,10 +174,36 @@ class SocketService {
     this.socket.emit(event, data);
   }
 
-  // Matchmaking
+  // ==================== MATCHMAKING ====================
+  
+  /**
+   * Join matchmaking queue with optional year filter
+   * @param {Object} criteria - Matchmaking criteria
+   * @param {number} criteria.ratingMin - Minimum problem rating (800-3500)
+   * @param {number} criteria.ratingMax - Maximum problem rating (800-3500)
+   * @param {number} criteria.duration - Match duration in minutes (1-180)
+   * @param {string[]} criteria.tags - Problem tags (optional)
+   * @param {number} criteria.minYear - Minimum problem year (optional, e.g. 2024)
+   */
   joinMatchmaking(criteria) {
     console.log('🎯 Joining matchmaking queue:', criteria);
-    this.emit('join-matchmaking', criteria);
+    
+    // Validate criteria before sending
+    if (!criteria.ratingMin || !criteria.ratingMax || !criteria.duration) {
+      console.error('❌ Invalid matchmaking criteria:', criteria);
+      throw new Error('Missing required matchmaking criteria');
+    }
+
+    // Ensure minYear is either null or a valid number
+    const validCriteria = {
+      ratingMin: criteria.ratingMin,
+      ratingMax: criteria.ratingMax,
+      duration: criteria.duration,
+      tags: criteria.tags || [],
+      minYear: criteria.minYear || null // Support year filter
+    };
+
+    this.emit('join-matchmaking', validCriteria);
   }
 
   leaveMatchmaking() {
@@ -185,10 +211,27 @@ class SocketService {
     this.emit('leave-matchmaking');
   }
 
-  // Duel
+  // ==================== DUEL ====================
+  
+  /**
+   * Create a duel with optional year filter
+   * @param {Object} settings - Duel settings
+   * @param {number} settings.ratingMin - Minimum problem rating
+   * @param {number} settings.ratingMax - Maximum problem rating
+   * @param {number} settings.duration - Match duration in minutes
+   * @param {string[]} settings.tags - Problem tags (optional)
+   * @param {number} settings.minYear - Minimum problem year (optional)
+   */
   createDuel(settings) {
     console.log('⚔️ Creating duel:', settings);
-    this.emit('create-duel', settings);
+    
+    const validSettings = {
+      ...settings,
+      tags: settings.tags || [],
+      minYear: settings.minYear || null // Support year filter
+    };
+
+    this.emit('create-duel', validSettings);
   }
 
   joinDuel(duelCode) {
@@ -196,7 +239,8 @@ class SocketService {
     this.emit('join-duel', duelCode);
   }
 
-  // Match Actions
+  // ==================== MATCH ACTIONS ====================
+  
   giveUp(matchId) {
     console.log('🏳️ Giving up match:', matchId);
     this.emit('give-up', { matchId });
@@ -210,6 +254,11 @@ class SocketService {
   acceptDraw(matchId) {
     console.log('✅ Accepting draw:', matchId);
     this.emit('accept-draw', { matchId });
+  }
+
+  rejectDraw(matchId) {
+    console.log('❌ Rejecting draw:', matchId);
+    this.emit('reject-draw', { matchId });
   }
 
   // ==================== CHAT METHODS ====================
@@ -246,6 +295,8 @@ class SocketService {
     this.off('match-messages-loaded', handler);
   }
 
+  // ==================== UTILITY METHODS ====================
+  
   getSocket() {
     return this.socket;
   }
@@ -256,6 +307,32 @@ class SocketService {
 
   isAuthenticated() {
     return this.authenticated;
+  }
+
+  /**
+   * Wait for socket connection
+   * @param {number} timeout - Timeout in milliseconds (default: 5000)
+   * @returns {Promise<boolean>}
+   */
+  waitForConnection(timeout = 5000) {
+    return new Promise((resolve, reject) => {
+      if (this.socket?.connected) {
+        resolve(true);
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        this.socket?.off('connect', onConnect);
+        reject(new Error('Connection timeout'));
+      }, timeout);
+
+      const onConnect = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+
+      this.socket?.once('connect', onConnect);
+    });
   }
 }
 

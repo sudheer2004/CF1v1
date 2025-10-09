@@ -40,6 +40,9 @@ const PROBLEM_TAGS = [
   'two pointers',
 ];
 
+// Generate year options from 2024 down to 2010
+const YEAR_OPTIONS = Array.from({ length: 15 }, (_, i) => 2024 - i);
+
 // Validation helper function - export this to use in parent components
 export const isFormValid = (formData) => {
   const ratingValid = formData.ratingMin >= 800 && 
@@ -100,10 +103,8 @@ export default function MatchSettingsForm({
     if (!isNaN(duration) && duration >= 1 && duration <= 180) {
       setFormData({ ...formData, duration });
     } else if (value === '') {
-      // If field is cleared, set to invalid value to trigger validation
       setFormData({ ...formData, duration: 0 });
     } else {
-      // Invalid input - set to invalid value
       setFormData({ ...formData, duration: -1 });
     }
   };
@@ -113,7 +114,6 @@ export default function MatchSettingsForm({
     if (!isNaN(rating)) {
       setFormData({ ...formData, [field]: rating });
     } else if (value === '') {
-      // If field is cleared, set to 0 to trigger validation
       setFormData({ ...formData, [field]: 0 });
     }
   };
@@ -171,6 +171,29 @@ export default function MatchSettingsForm({
             Min rating cannot be greater than max rating
           </p>
         )}
+      </div>
+
+      {/* Year Filter - NEW */}
+      <div className="mb-6">
+        <label className="block text-white font-medium mb-3">
+          Problem Year (Optional)
+        </label>
+        <select
+          value={formData.minYear || ''}
+          onChange={(e) => setFormData({ ...formData, minYear: e.target.value ? parseInt(e.target.value) : null })}
+          disabled={disabled}
+          className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500 disabled:opacity-50"
+        >
+          <option value="">Any Year</option>
+          {YEAR_OPTIONS.map((year) => (
+            <option key={year} value={year}>
+              {year} and later
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-gray-500 mt-2">
+          Filter problems by publication year. Automatically falls back if no problems match.
+        </p>
       </div>
 
       {/* Duration */}

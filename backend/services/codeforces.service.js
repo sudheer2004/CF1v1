@@ -34,8 +34,37 @@ const fetchAllProblems = async () => {
   }
 };
 
-// Filter problems by rating range and tags
-const getFilteredProblems = async (ratingMin, ratingMax, tags) => {
+/**
+ * Estimate problem year from contestId
+ * Codeforces contests are roughly chronological:
+ * - Contest IDs < 100: 2010-2011
+ * - Contest IDs 100-500: 2011-2015
+ * - Contest IDs 500-1000: 2015-2018
+ * - Contest IDs 1000-1500: 2018-2020
+ * - Contest IDs 1500-2000: 2020-2023
+ * - Contest IDs 2000+: 2023+
+ * 
+ * This is an approximation since some contests are added out of order
+ */
+const estimateProblemYear = (contestId) => {
+  if (!contestId || contestId < 1) return null;
+  
+  if (contestId < 100) return 2010;
+  if (contestId < 500) return 2013;
+  if (contestId < 1000) return 2017;
+  if (contestId < 1500) return 2019;
+  if (contestId < 2000) return 2022;
+  return 2024;
+};
+
+/**
+ * Filter problems by rating range, tags, and optional year
+ * @param {number} ratingMin - Minimum rating (800-3500)
+ * @param {number} ratingMax - Maximum rating (800-3500)
+ * @param {string[]} tags - Array of problem tags (optional)
+ * @param {number} minYear - Minimum problem year (optional, e.g., 2020)
+ */
+const getFilteredProblems = async (ratingMin, ratingMax, tags, minYear = null) => {
   const allProblems = await fetchAllProblems();
 
   const filtered = allProblems.filter(problem => {
@@ -53,22 +82,50 @@ const getFilteredProblems = async (ratingMin, ratingMax, tags) => {
       if (!hasCommonTag) return false;
     }
 
+    // Check year if specified
+    if (minYear !== null && minYear > 0) {
+      const estimatedYear = estimateProblemYear(problem.contestId);
+      if (estimatedYear !== null && estimatedYear < minYear) {
+        return false;
+      }
+    }
+
     return true;
   });
 
   return filtered;
 };
 
-// Select random problem from filtered list
-const selectRandomProblem = async (ratingMin, ratingMax, tags) => {
-  const problems = await getFilteredProblems(ratingMin, ratingMax, tags);
+/**
+ * Select random problem from filtered list with automatic year fallback
+ * @param {number} ratingMin - Minimum rating
+ * @param {number} ratingMax - Maximum rating
+ * @param {string[]} tags - Problem tags (optional)
+ * @param {number} minYear - Minimum year (optional, with automatic fallback)
+ */
+const selectRandomProblem = async (ratingMin, ratingMax, tags, minYear = null) => {
+  let problems = await getFilteredProblems(ratingMin, ratingMax, tags, minYear);
+
+  // AUTOMATIC FALLBACK: If no problems match with year filter, retry without it
+  if (problems.length === 0 && minYear !== null) {
+    console.log(`⚠️ No problems found for year ${minYear}+, falling back to any year...`);
+    problems = await getFilteredProblems(ratingMin, ratingMax, tags, null);
+  }
 
   if (problems.length === 0) {
     throw new Error('No problems found matching the criteria');
   }
 
   const randomIndex = Math.floor(Math.random() * problems.length);
-  return problems[randomIndex];
+  const selectedProblem = problems[randomIndex];
+  
+  // Log year info for debugging
+  if (minYear !== null) {
+    const estimatedYear = estimateProblemYear(selectedProblem.contestId);
+    console.log(`✅ Selected problem from contest ${selectedProblem.contestId} (estimated year: ${estimatedYear})`);
+  }
+  
+  return selectedProblem;
 };
 
 // Fetch user submissions
@@ -134,4 +191,5 @@ module.exports = {
   selectRandomProblem,
   fetchUserSubmissions,
   checkProblemSolved,
+  estimateProblemYear, // Export for testing
 };

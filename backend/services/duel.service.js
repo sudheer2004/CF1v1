@@ -3,16 +3,17 @@ const { generateDuelCode } = require('../utils/helpers.util');
 const { validateMatchSettings, sanitizeMatchSettings } = require('../validators/match.validator');
 
 // Create new duel
-const createDuel = async (creatorId, ratingMin, ratingMax, tags, duration) => {
+const createDuel = async (creatorId, ratingMin, ratingMax, tags, duration, minYear = null) => {
   // Sanitize inputs first
-  const sanitized = sanitizeMatchSettings(ratingMin, ratingMax, tags, duration);
+  const sanitized = sanitizeMatchSettings(ratingMin, ratingMax, tags, duration, minYear);
   
   // Validate settings
   const validation = validateMatchSettings(
     sanitized.ratingMin,
     sanitized.ratingMax,
     sanitized.tags,
-    sanitized.duration
+    sanitized.duration,
+    sanitized.minYear
   );
 
   if (!validation.isValid) {
@@ -48,6 +49,7 @@ const createDuel = async (creatorId, ratingMin, ratingMax, tags, duration) => {
       ratingMax: sanitized.ratingMax,
       tags: sanitized.tags,
       duration: sanitized.duration,
+      minYear: sanitized.minYear, // NEW: Store year filter
       status: 'waiting',
     },
     include: {

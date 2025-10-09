@@ -60,6 +60,25 @@ const determineProblemTags = (tags1, tags2) => {
   return [];
 };
 
+// Helper function to determine final minYear from two players
+const determineFinalMinYear = (minYear1, minYear2) => {
+  // If neither player specified a year, return null
+  if (!minYear1 && !minYear2) {
+    return null;
+  }
+  
+  // If only one player specified a year, use that
+  if (minYear1 && !minYear2) {
+    return minYear1;
+  }
+  if (!minYear1 && minYear2) {
+    return minYear2;
+  }
+  
+  // If both specified years, use the more restrictive (higher) value
+  return Math.max(minYear1, minYear2);
+};
+
 // Helper to stop polling and clean up
 const stopPolling = (matchId) => {
   if (activePolls.has(matchId)) {
@@ -234,7 +253,8 @@ const initializeSocket = (io) => {
           return;
         }
 
-        const { ratingMin, ratingMax, tags, duration } = data;
+        // UPDATED: Extract minYear from request
+        const { ratingMin, ratingMax, tags, duration, minYear } = data;
 
         // ADD VALIDATION CHECK
         if (ratingMin === undefined || ratingMax === undefined || duration === undefined) {
@@ -242,12 +262,16 @@ const initializeSocket = (io) => {
           return;
         }
 
+        // Note: minYear is optional, so we don't validate it here
+        // It will be validated in the codeforces service
+
         const queueEntry = await matchmakingService.addToQueue(
           socket.userId,
           ratingMin,
           ratingMax,
           tags,
           duration
+          // Note: minYear is NOT stored in queue - it's just used for problem selection
         );
 
         socket.emit("queue-joined", { queueEntry });
@@ -279,10 +303,21 @@ const initializeSocket = (io) => {
 
           const problemTags = determineProblemTags(queueEntry.tags, match.tags);
 
+          // NEW: Determine final minYear (use higher value from both players)
+          const finalMinYear = determineFinalMinYear(minYear, match.minYear);
+          
+          console.log('🗓️ Year filter:', {
+            player1MinYear: minYear || 'any',
+            player2MinYear: match.minYear || 'any',
+            finalMinYear: finalMinYear || 'any'
+          });
+
+          // UPDATED: Pass minYear to problem selection
           const problem = await codeforcesService.selectRandomProblem(
             overlapMin,
             overlapMax,
-            problemTags
+            problemTags,
+            finalMinYear // NEW PARAMETER
           );
 
           const matchDuration = Math.max(queueEntry.duration, match.duration);
@@ -388,7 +423,8 @@ const initializeSocket = (io) => {
           return;
         }
 
-        const { ratingMin, ratingMax, tags, duration } = data;
+        // UPDATED: Extract minYear from request
+        const { ratingMin, ratingMax, tags, duration, minYear } = data;
 
         // ADD VALIDATION CHECK
         if (ratingMin === undefined || ratingMax === undefined || duration === undefined) {
@@ -396,24 +432,24 @@ const initializeSocket = (io) => {
           return;
         }
 
+        // UPDATED: Pass minYear to duel creation
         const duel = await duelService.createDuel(
           socket.userId,
           ratingMin,
           ratingMax,
-          tags || [], // Handle empty tags
-          duration
+          tags || [],
+          duration,
+          minYear || null // NEW PARAMETER
         );
 
         socket.join(`duel-${duel.duelCode}`);
 
-        console.log("✅ Duel created:", duel.duelCode);
+        console.log("✅ Duel created:", duel.duelCode, 'with year filter:', minYear || 'any');
 
-        // Emit ONCE with complete data
         socket.emit("duel-created", { duel });
       } catch (error) {
         console.error("Create duel error:", error);
         
-        // IMPROVED ERROR HANDLING
         if (error.details && Array.isArray(error.details)) {
           socket.emit("error", {
             message: error.details.join(', ')
@@ -458,11 +494,15 @@ const initializeSocket = (io) => {
 
         console.log("✅ Player joined duel:", duelCode);
 
+        // UPDATED: Pass minYear from duel to problem selection
         const problem = await codeforcesService.selectRandomProblem(
           duel.ratingMin,
           duel.ratingMax,
-          duel.tags
+          duel.tags,
+          duel.minYear || null // NEW PARAMETER (from duel settings)
         );
+
+        console.log('🗓️ Duel year filter:', duel.minYear || 'any');
 
         await duelService.startDuel(
           duel.id,
