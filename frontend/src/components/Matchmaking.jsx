@@ -17,11 +17,13 @@ export default function Matchmaking({
     ratingMax: 1600,
     tags: [],
     duration: 30,
+    minYear: null, // ✅ Add minYear support
   });
   const [queueTime, setQueueTime] = useState(0);
   const [error, setError] = useState('');
   const [isJoiningQueue, setIsJoiningQueue] = useState(false);
   const [isAcceptingDraw, setIsAcceptingDraw] = useState(false);
+  const [isPreparingMatch, setIsPreparingMatch] = useState(false); // ✅ NEW STATE
 
   const listenersRegistered = useRef(false);
   const queueStartTime = useRef(null);
@@ -78,10 +80,19 @@ export default function Matchmaking({
       setError('');
     };
 
-    const handleMatchFound = (data) => {
+    // ✅ NEW: Handle match preparation (fetching unsolved problems)
+    const handleMatchPreparing = (data) => {
      
+      setIsPreparingMatch(true);
+      setInQueue(false);
+      queueStartTime.current = null;
+      setQueueTime(0);
+    };
+
+    const handleMatchFound = (data) => {
       setInQueue(false);
       setIsJoiningQueue(false);
+      setIsPreparingMatch(false); // ✅ Reset preparing state
       queueStartTime.current = null;
       setQueueTime(0);
       
@@ -97,7 +108,6 @@ export default function Matchmaking({
         ? data.match.endTime 
         : new Date(data.match.endTime).getTime();
       
-     
       
       setActiveMatch({
         ...data,
@@ -116,11 +126,13 @@ export default function Matchmaking({
       setInQueue(false);
       setIsJoiningQueue(false);
       setIsAcceptingDraw(false);
+      setIsPreparingMatch(false); // ✅ Reset preparing state
       queueStartTime.current = null;
       setQueueTime(0);
     };
 
     socketService.on('queue-joined', handleQueueJoined);
+    socketService.on('match-preparing', handleMatchPreparing); // ✅ NEW LISTENER
     socketService.on('match-found', handleMatchFound);
     socketService.on('error', handleError);
 
@@ -128,6 +140,7 @@ export default function Matchmaking({
 
     return () => {
       socketService.off('queue-joined', handleQueueJoined);
+      socketService.off('match-preparing', handleMatchPreparing); // ✅ CLEANUP
       socketService.off('match-found', handleMatchFound);
       socketService.off('error', handleError);
       listenersRegistered.current = false;
@@ -203,6 +216,7 @@ export default function Matchmaking({
     resetMatch();
     setError('');
     setIsAcceptingDraw(false);
+    setIsPreparingMatch(false); // ✅ Reset preparing state
     setQueueTime(0);
     queueStartTime.current = null;
   };
@@ -244,6 +258,49 @@ export default function Matchmaking({
     );
   }
 
+  // ✅ NEW: Match Preparing View
+  if (isPreparingMatch) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-gray-800/50 backdrop-blur-lg rounded-lg p-8 border border-purple-500/20 text-center">
+          <div className="mb-6">
+            <div className="relative w-24 h-24 mx-auto">
+              {/* Outer spinning ring */}
+              <div className="absolute inset-0 border-4 border-purple-500/30 rounded-full animate-spin" 
+                   style={{ borderTopColor: '#a855f7' }}></div>
+              {/* Inner pulsing circle */}
+              <div className="absolute inset-4 bg-purple-500/20 rounded-full animate-pulse"></div>
+              {/* Center icon */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Users className="w-10 h-10 text-purple-400" />
+              </div>
+            </div>
+          </div>
+          
+          <h2 className="text-2xl font-bold text-white mb-2">Opponent Found!</h2>
+          <p className="text-gray-300 mb-6">Selecting the perfect problem for you...</p>
+          
+          <div className="bg-gray-700/50 rounded-lg p-4 mb-6">
+            <div className="flex items-center justify-center space-x-2 text-sm text-gray-400 mb-2">
+              <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+              <span>Fetching your solved problems</span>
+            </div>
+            <div className="flex items-center justify-center space-x-2 text-sm text-gray-400 mb-2">
+              <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+              <span>Fetching opponent's solved problems</span>
+            </div>
+            <div className="flex items-center justify-center space-x-2 text-sm text-gray-400">
+              <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+              <span>Finding fresh problem</span>
+            </div>
+          </div>
+          
+          <p className="text-sm text-gray-500">This usually takes 2-5 seconds</p>
+        </div>
+      </div>
+    );
+  }
+
   // Queue View
   if (inQueue) {
     return (
@@ -263,6 +320,9 @@ export default function Matchmaking({
             <p className="text-white">Duration: {formData.duration} minutes</p>
             {formData.tags.length > 0 && (
               <p className="text-white">Tags: {formData.tags.join(', ')}</p>
+            )}
+            {formData.minYear && (
+              <p className="text-white">Min Year: {formData.minYear}</p>
             )}
           </div>
           <button

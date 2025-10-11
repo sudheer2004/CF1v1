@@ -19,12 +19,14 @@ export default function DuelMode({
   const [isCreatingDuel, setIsCreatingDuel] = useState(false);
   const [isJoiningDuel, setIsJoiningDuel] = useState(false);
   const [waitingForMatch, setWaitingForMatch] = useState(false);
-  const [isAcceptingDraw, setIsAcceptingDraw] = useState(false); // ✅ Added
+  const [isAcceptingDraw, setIsAcceptingDraw] = useState(false);
+  const [isPreparingMatch, setIsPreparingMatch] = useState(false); // ✅ NEW STATE
   const [formData, setFormData] = useState({
     ratingMin: 800,
     ratingMax: 1600,
     tags: [],
     duration: 30,
+    minYear: null, // ✅ Add minYear support
   });
 
   const listenersRegistered = useRef(false);
@@ -51,20 +53,20 @@ export default function DuelMode({
     setMatchAttempts,
   });
 
-  // ✅ Enhanced accept draw handler with loading state
+  // Enhanced accept draw handler with loading state
   const handleAcceptDraw = () => {
     setIsAcceptingDraw(true);
     originalHandleAcceptDraw();
   };
 
-  // ✅ Reset loading state when match result is set
+  // Reset loading state when match result is set
   useEffect(() => {
     if (matchResult) {
       setIsAcceptingDraw(false);
     }
   }, [matchResult]);
 
-  // ✅ Reset loading state when active match is cleared
+  // Reset loading state when active match is cleared
   useEffect(() => {
     if (!activeMatch) {
       setIsAcceptingDraw(false);
@@ -86,19 +88,23 @@ export default function DuelMode({
       }
     };
 
-    const handleMatchFound = (data) => {
-      console.log('🎮 DUEL: Match found:', data);
+    // ✅ NEW: Handle match preparation
+    const handleMatchPreparing = (data) => {   
+      setIsPreparingMatch(true);
       setWaitingForMatch(false);
+    };
+
+    const handleMatchFound = (data) => {
+      setWaitingForMatch(false);
+      setIsPreparingMatch(false); // ✅ Reset preparing state
       setDuel(null);
       currentDuelCode.current = null;
       setMode('menu');
       setIsJoiningDuel(false);
       setIsCreatingDuel(false);
       
-      // ✅ FIXED: Use endTime from server (industry standard)
       // Validate that endTime exists
       if (!data.match?.endTime) {
-        console.error('❌ DUEL: Match found but missing endTime:', data);
         setError('Invalid match data received. Please try again.');
         return;
       }
@@ -108,21 +114,19 @@ export default function DuelMode({
         ? data.match.endTime 
         : new Date(data.match.endTime).getTime();
       
-      console.log('✅ DUEL: Setting endTime:', endTimeMs);
       
-      // ✅ Use the SAME format as Matchmaking
       setActiveMatch({
         ...data,
         match: {
           ...data.match,
-          endTime: endTimeMs  // This is what App.jsx timer uses!
+          endTime: endTimeMs
         }
       });
       
       setMatchResult(null);
       setMatchAttempts({ player1: 0, player2: 0 });
       
-      console.log('✅ DUEL: Match setup complete');
+     
     };
 
     const handleError = (err) => {
@@ -131,10 +135,12 @@ export default function DuelMode({
       setIsCreatingDuel(false);
       setIsJoiningDuel(false);
       setWaitingForMatch(false);
-      setIsAcceptingDraw(false); // ✅ Reset loading state on error
+      setIsAcceptingDraw(false);
+      setIsPreparingMatch(false); // ✅ Reset preparing state
     };
 
     socketService.on('duel-created', handleDuelCreated);
+    socketService.on('match-preparing', handleMatchPreparing); // ✅ NEW LISTENER
     socketService.on('match-found', handleMatchFound);
     socketService.on('error', handleError);
 
@@ -142,6 +148,7 @@ export default function DuelMode({
 
     return () => {
       socketService.off('duel-created', handleDuelCreated);
+      socketService.off('match-preparing', handleMatchPreparing); // ✅ CLEANUP
       socketService.off('match-found', handleMatchFound);
       socketService.off('error', handleError);
       listenersRegistered.current = false;
@@ -154,14 +161,14 @@ export default function DuelMode({
       setWaitingForMatch(true);
       
       const timeout = setTimeout(() => {
-        if (waitingForMatch) {
+        if (waitingForMatch && !isPreparingMatch) {
           setError('Taking longer than expected. Please wait or try refreshing if this persists.');
         }
       }, 10000);
 
       return () => clearTimeout(timeout);
     }
-  }, [mode, duel, waitingForMatch]);
+  }, [mode, duel, waitingForMatch, isPreparingMatch]);
 
   const handleCreateDuel = () => {
     if (!user.cfHandle) {
@@ -211,7 +218,8 @@ export default function DuelMode({
   const handleNewMatch = () => {
     resetMatch();
     setError('');
-    setIsAcceptingDraw(false); // ✅ Reset loading state
+    setIsAcceptingDraw(false);
+    setIsPreparingMatch(false); // ✅ Reset preparing state
   };
 
   const handleCancelDuel = () => {
@@ -220,6 +228,7 @@ export default function DuelMode({
     currentDuelCode.current = null;
     setError('');
     setWaitingForMatch(false);
+    setIsPreparingMatch(false); // ✅ Reset preparing state
   };
 
   // Match Result View
@@ -247,9 +256,49 @@ export default function DuelMode({
         onGiveUp={handleGiveUp}
         onOfferDraw={handleOfferDraw}
         onAcceptDraw={handleAcceptDraw}
-        isAcceptingDraw={isAcceptingDraw} // ✅ Pass loading state
+        isAcceptingDraw={isAcceptingDraw}
         matchTitle="Duel in Progress"
       />
+    );
+  }
+
+  // ✅ NEW: Match Preparing View (shown after opponent joins)
+  if (isPreparingMatch) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-gray-800/50 backdrop-blur-lg rounded-lg p-8 border border-purple-500/20 text-center">
+          <div className="mb-6">
+            <div className="relative w-24 h-24 mx-auto">
+              <div className="absolute inset-0 border-4 border-pink-500/30 rounded-full animate-spin" 
+                   style={{ borderTopColor: '#ec4899' }}></div>
+              <div className="absolute inset-4 bg-pink-500/20 rounded-full animate-pulse"></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Swords className="w-10 h-10 text-pink-400" />
+              </div>
+            </div>
+          </div>
+          
+          <h2 className="text-2xl font-bold text-white mb-2">Opponent Joined!</h2>
+          <p className="text-gray-300 mb-6">Selecting the perfect problem for your duel...</p>
+          
+          <div className="bg-gray-700/50 rounded-lg p-4 mb-6">
+            <div className="flex items-center justify-center space-x-2 text-sm text-gray-400 mb-2">
+              <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse"></div>
+              <span>Analyzing your Codeforces history</span>
+            </div>
+            <div className="flex items-center justify-center space-x-2 text-sm text-gray-400 mb-2">
+              <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+              <span>Analyzing opponent's history</span>
+            </div>
+            <div className="flex items-center justify-center space-x-2 text-sm text-gray-400">
+              <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+              <span>Finding unsolved problem</span>
+            </div>
+          </div>
+          
+          <p className="text-sm text-gray-500">This usually takes 2-5 seconds</p>
+        </div>
+      </div>
     );
   }
 
@@ -291,6 +340,9 @@ export default function DuelMode({
             <p className="mb-1">Rating: {duel.ratingMin} - {duel.ratingMax}</p>
             <p className="mb-1">Duration: {duel.duration} minutes</p>
             <p>Tags: {duel.tags.length > 0 ? duel.tags.join(', ') : 'Any'}</p>
+            {duel.minYear && (
+              <p>Min Year: {duel.minYear}</p>
+            )}
           </div>
 
           {waitingForMatch && (

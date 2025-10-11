@@ -173,7 +173,6 @@ export default function App() {
         
         // ✅ NEW: Check for endTime instead of remainingTime
         if (matchResponse.match && matchResponse.match.endTime) {
-          devLog('📥 Poll: Found active match with endTime:', matchResponse.match.endTime);
           
           setActiveMatch({
             match: matchResponse.match,
@@ -216,7 +215,7 @@ export default function App() {
     // Set initial timer
     setMatchTimer(calculateRemaining());
     
-    devLog(`🎬 Timer started - endTime: ${activeMatch.match.endTime}`);
+  
 
     // Update every second
     const interval = setInterval(() => {
@@ -234,7 +233,7 @@ export default function App() {
     if (matchTimer === 0) {
       matchEndHandledRef.current = true;
       
-      devLog('⏱️ Timer expired');
+     
       
       const timeoutId = setTimeout(() => {
         setMatchResult({
@@ -274,7 +273,7 @@ export default function App() {
           // Only update attempts, timer handles itself via endTime
           setMatchAttempts(matchResponse.attempts);
           
-          devLog('🔄 Synced attempts:', matchResponse.attempts);
+         
         }
       } catch (err) {
         // Ignore sync errors

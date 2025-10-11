@@ -213,155 +213,159 @@ const initializeSocket = (io) => {
       }
     });
 
-    socket.on("join-matchmaking", async (data) => {
+   socket.on("join-matchmaking", async (data) => {
+  try {
+    if (!socket.userId) {
+      socket.emit("error", { message: "Not authenticated" });
+      return;
+    }
+
+    // CHECK: User already has active match
+    const existingMatch = await checkActiveMatch(socket.userId);
+    if (existingMatch) {
+      socket.emit("error", {
+        message: "You already have an active match. Please complete it first.",
+      });
+      return;
+    }
+
+    const { ratingMin, ratingMax, tags, duration, minYear } = data;
+
+    // Validation
+    if (ratingMin === undefined || ratingMax === undefined || duration === undefined) {
+      socket.emit("error", { message: "Missing required match settings" });
+      return;
+    }
+
+
+    const queueEntry = await matchmakingService.addToQueue(
+      socket.userId,
+      ratingMin,
+      ratingMax,
+      tags,
+      duration
+    );
+
+    socket.emit("queue-joined", { queueEntry });
+
+    const match = await matchmakingService.findMatch(queueEntry);
+
+    if (match) {
+      // Double-check both users don't have active matches
+      const user1ActiveMatch = await checkActiveMatch(socket.userId);
+      const user2ActiveMatch = await checkActiveMatch(match.userId);
+
+      if (user1ActiveMatch || user2ActiveMatch) {
+        await matchmakingService.removeFromQueue(socket.userId);
+        await matchmakingService.removeFromQueue(match.userId);
+        socket.emit("error", {
+          message: "Match cancelled - one player has an active match",
+        });
+        return;
+      }
+
+      await matchmakingService.removeFromQueue(socket.userId);
+      await matchmakingService.removeFromQueue(match.userId);
+
+      const overlapMin = Math.max(queueEntry.ratingMin, match.ratingMin);
+      const overlapMax = Math.min(queueEntry.ratingMax, match.ratingMax);
+      const problemTags = determineProblemTags(queueEntry.tags, match.tags);
+      const finalMinYear = determineFinalMinYear(minYear, match.minYear);
+
+      // NEW: Emit "preparing match" event to both users
+      io.to(`user-${socket.userId}`).emit("match-preparing", {
+        message: "Opponent found! Selecting problem...",
+      });
+      io.to(`user-${match.userId}`).emit("match-preparing", {
+        message: "Opponent found! Selecting problem...",
+      });
+
       try {
-        if (!socket.userId) {
-          socket.emit("error", { message: "Not authenticated" });
-          return;
+        // NEW: Get both users' CF handles
+        const player1 = await userService.findUserById(socket.userId);
+        const player2 = await userService.findUserById(match.userId);
+
+        if (!player1?.cfHandle || !player2?.cfHandle) {
+          throw new Error("Missing Codeforces handles");
         }
 
-        // CHECK: User already has active match
-        const existingMatch = await checkActiveMatch(socket.userId);
-        if (existingMatch) {
-          socket.emit("error", {
-            message:
-              "You already have an active match. Please complete it first.",
-          });
-          return;
-        }
-
-        // UPDATED: Extract minYear from request
-        const { ratingMin, ratingMax, tags, duration, minYear } = data;
-
-        // ADD VALIDATION CHECK
-        if (ratingMin === undefined || ratingMax === undefined || duration === undefined) {
-          socket.emit("error", { message: "Missing required match settings" });
-          return;
-        }
-
-        // Note: minYear is optional, so we don't validate it here
-        // It will be validated in the codeforces service
-
-        const queueEntry = await matchmakingService.addToQueue(
-          socket.userId,
-          ratingMin,
-          ratingMax,
-          tags,
-          duration
-          // Note: minYear is NOT stored in queue - it's just used for problem selection
+        // NEW: Use unsolved problem selection (2 API calls here)
+        const problem = await codeforcesService.selectRandomUnsolvedProblem(
+          overlapMin,
+          overlapMax,
+          problemTags,
+          finalMinYear,
+          player1.cfHandle,
+          player2.cfHandle
         );
 
-        socket.emit("queue-joined", { queueEntry });
+        const matchDuration = Math.max(queueEntry.duration, match.duration);
 
-        const match = await matchmakingService.findMatch(queueEntry);
+        const createdMatch = await matchService.createMatch(
+          socket.userId,
+          match.userId,
+          problem,
+          matchDuration
+        );
 
-        if (match) {
-          // Double-check both users don't have active matches
-          const user1ActiveMatch = await checkActiveMatch(socket.userId);
-          const user2ActiveMatch = await checkActiveMatch(match.userId);
-
-          if (user1ActiveMatch || user2ActiveMatch) {
-          
-            await matchmakingService.removeFromQueue(socket.userId);
-            await matchmakingService.removeFromQueue(match.userId);
-            socket.emit("error", {
-              message: "Match cancelled - one player has an active match",
-            });
-            return;
-          }
-
-          await matchmakingService.removeFromQueue(socket.userId);
-          await matchmakingService.removeFromQueue(match.userId);
-
-          const overlapMin = Math.max(queueEntry.ratingMin, match.ratingMin);
-          const overlapMax = Math.min(queueEntry.ratingMax, match.ratingMax);
-
-          const problemTags = determineProblemTags(queueEntry.tags, match.tags);
-
-          // NEW: Determine final minYear (use higher value from both players)
-          const finalMinYear = determineFinalMinYear(minYear, match.minYear);
-          
-        
-
-          // UPDATED: Pass minYear to problem selection
-          const problem = await codeforcesService.selectRandomProblem(
-            overlapMin,
-            overlapMax,
-            problemTags,
-            finalMinYear // NEW PARAMETER
-          );
-
-          const matchDuration = Math.max(queueEntry.duration, match.duration);
-
-          const createdMatch = await matchService.createMatch(
-            socket.userId,
-            match.userId,
-            problem,
-            matchDuration
-          );
-
-          // Fetch full match with player details for polling
-          const fullMatch = await prisma.match.findUnique({
-            where: { id: createdMatch.id },
-            include: {
-              player1: {
-                select: {
-                  id: true,
-                  username: true,
-                  cfHandle: true,
-                  rating: true,
-                },
-              },
-              player2: {
-                select: {
-                  id: true,
-                  username: true,
-                  cfHandle: true,
-                  rating: true,
-                },
-              },
+        // Fetch full match with player details
+        const fullMatch = await prisma.match.findUnique({
+          where: { id: createdMatch.id },
+          include: {
+            player1: {
+              select: { id: true, username: true, cfHandle: true, rating: true },
             },
-          });
+            player2: {
+              select: { id: true, username: true, cfHandle: true, rating: true },
+            },
+          },
+        });
 
-          const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
+        const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
 
-     
+        // Emit match found to both users
+        io.to(`user-${socket.userId}`).emit("match-found", {
+          match: createdMatch,
+          problemUrl,
+          opponent: match.user,
+        });
 
-          // FIXED: Use io.to() for reliable delivery
-          io.to(`user-${socket.userId}`).emit("match-found", {
-            match: createdMatch,
-            problemUrl,
-            opponent: match.user,
-          });
-         
+        io.to(`user-${match.userId}`).emit("match-found", {
+          match: createdMatch,
+          problemUrl,
+          opponent: queueEntry.user,
+        });
 
-          io.to(`user-${match.userId}`).emit("match-found", {
-            match: createdMatch,
-            problemUrl,
-            opponent: queueEntry.user,
-          });
-  
+        // Start polling
+        startSubmissionPolling(io, fullMatch);
 
-          // Start polling with full match data
+      } catch (problemError) {
+        console.error('Problem selection failed:', problemError);
         
-          startSubmissionPolling(io, fullMatch);
-         
-        }
-      } catch (error) {
-        console.error("Join matchmaking error:", error);
-        
-        // IMPROVED ERROR HANDLING
-        if (error.details && Array.isArray(error.details)) {
-          socket.emit("error", {
-            message: error.details.join(', ')
-          });
-        } else {
-          socket.emit("error", {
-            message: error.message || "Failed to join matchmaking",
-          });
-        }
+        // Notify both users
+        io.to(`user-${socket.userId}`).emit("error", {
+          message: "Failed to find suitable problem. Please try again.",
+        });
+        io.to(`user-${match.userId}`).emit("error", {
+          message: "Failed to find suitable problem. Please try again.",
+        });
       }
-    });
+    }
+  } catch (error) {
+    console.error("Join matchmaking error:", error);
+    
+    if (error.details && Array.isArray(error.details)) {
+      socket.emit("error", {
+        message: error.details.join(', ')
+      });
+    } else {
+      socket.emit("error", {
+        message: error.message || "Failed to join matchmaking",
+      });
+    }
+  }
+});
+
 
     socket.on("leave-matchmaking", async () => {
       try {
@@ -430,130 +434,135 @@ const initializeSocket = (io) => {
       }
     });
 
-    socket.on("join-duel", async (duelCode) => {
-      try {
-        if (!socket.userId) {
-          socket.emit("error", { message: "Not authenticated" });
-          return;
-        }
+   socket.on("join-duel", async (duelCode) => {
+  try {
+    if (!socket.userId) {
+      socket.emit("error", { message: "Not authenticated" });
+      return;
+    }
 
-        // CHECK: User already has active match
-        const existingMatch = await checkActiveMatch(socket.userId);
-        if (existingMatch) {
-          socket.emit("error", {
-            message:
-              "You already have an active match. Please complete it first.",
-          });
-          return;
-        }
+    // CHECK: User already has active match
+    const existingMatch = await checkActiveMatch(socket.userId);
+    if (existingMatch) {
+      socket.emit("error", {
+        message: "You already have an active match. Please complete it first.",
+      });
+      return;
+    }
 
-        const duel = await duelService.joinDuel(duelCode, socket.userId);
+    const duel = await duelService.joinDuel(duelCode, socket.userId);
 
-        // Also check if duel creator has active match
-        const creatorActiveMatch = await checkActiveMatch(duel.creatorId);
-        if (creatorActiveMatch) {
-          socket.emit("error", {
-            message: "Duel creator has an active match. Please wait.",
-          });
-          return;
-        }
+    // Check if duel creator has active match
+    const creatorActiveMatch = await checkActiveMatch(duel.creatorId);
+    if (creatorActiveMatch) {
+      socket.emit("error", {
+        message: "Duel creator has an active match. Please wait.",
+      });
+      return;
+    }
 
-        socket.join(`duel-${duelCode}`);
+    socket.join(`duel-${duelCode}`);
 
-     
-
-        // UPDATED: Pass minYear from duel to problem selection
-        const problem = await codeforcesService.selectRandomProblem(
-          duel.ratingMin,
-          duel.ratingMax,
-          duel.tags,
-          duel.minYear || null // NEW PARAMETER (from duel settings)
-        );
-
-    
-
-        await duelService.startDuel(
-          duel.id,
-          formatProblemId(problem.contestId, problem.index),
-          problem.name,
-          problem.rating
-        );
-
-        const createdMatch = await matchService.createMatch(
-          duel.creatorId,
-          socket.userId,
-          problem,
-          duel.duration
-        );
-
-        // Fetch full match with player details for polling
-        const fullMatch = await prisma.match.findUnique({
-          where: { id: createdMatch.id },
-          include: {
-            player1: {
-              select: {
-                id: true,
-                username: true,
-                cfHandle: true,
-                rating: true,
-              },
-            },
-            player2: {
-              select: {
-                id: true,
-                username: true,
-                cfHandle: true,
-                rating: true,
-              },
-            },
-          },
-        });
-
-        const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
-
-        // Get both players' info
-        const creator = await userService.findUserById(duel.creatorId);
-        const joiner = await userService.findUserById(socket.userId);
-
-
-
-        // FIXED: Use io.to() to emit to specific user rooms instead of finding sockets
-        io.to(`user-${duel.creatorId}`).emit("match-found", {
-          match: createdMatch,
-          problemUrl,
-          opponent: {
-            id: joiner.id,
-            username: joiner.username,
-            cfHandle: joiner.cfHandle,
-            rating: joiner.rating,
-          },
-        });
-  
-
-        io.to(`user-${socket.userId}`).emit("match-found", {
-          match: createdMatch,
-          problemUrl,
-          opponent: {
-            id: creator.id,
-            username: creator.username,
-            cfHandle: creator.cfHandle,
-            rating: creator.rating,
-          },
-        });
-    
-
-        // Start polling with full match data
-      
-  
-        startSubmissionPolling(io, fullMatch);
-    
-      } catch (error) {
-        console.error("Join duel error:", error);
-        socket.emit("error", {
-          message: error.message || "Failed to join duel",
-        });
-      }
+    // NEW: Emit "preparing match" event
+    io.to(`user-${socket.userId}`).emit("match-preparing", {
+      message: "Selecting problem...",
     });
+    io.to(`user-${duel.creatorId}`).emit("match-preparing", {
+      message: "Opponent joined! Selecting problem...",
+    });
+
+    try {
+      // NEW: Get both users' CF handles
+      const creator = await userService.findUserById(duel.creatorId);
+      const joiner = await userService.findUserById(socket.userId);
+
+      if (!creator?.cfHandle || !joiner?.cfHandle) {
+        throw new Error("Missing Codeforces handles");
+      }
+
+      // NEW: Use unsolved problem selection
+      const problem = await codeforcesService.selectRandomUnsolvedProblem(
+        duel.ratingMin,
+        duel.ratingMax,
+        duel.tags,
+        duel.minYear || null,
+        creator.cfHandle,
+        joiner.cfHandle
+      );
+
+      await duelService.startDuel(
+        duel.id,
+        formatProblemId(problem.contestId, problem.index),
+        problem.name,
+        problem.rating
+      );
+
+      const createdMatch = await matchService.createMatch(
+        duel.creatorId,
+        socket.userId,
+        problem,
+        duel.duration
+      );
+
+      // Fetch full match
+      const fullMatch = await prisma.match.findUnique({
+        where: { id: createdMatch.id },
+        include: {
+          player1: {
+            select: { id: true, username: true, cfHandle: true, rating: true },
+          },
+          player2: {
+            select: { id: true, username: true, cfHandle: true, rating: true },
+          },
+        },
+      });
+
+      const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
+
+      // Emit match found
+      io.to(`user-${duel.creatorId}`).emit("match-found", {
+        match: createdMatch,
+        problemUrl,
+        opponent: {
+          id: joiner.id,
+          username: joiner.username,
+          cfHandle: joiner.cfHandle,
+          rating: joiner.rating,
+        },
+      });
+
+      io.to(`user-${socket.userId}`).emit("match-found", {
+        match: createdMatch,
+        problemUrl,
+        opponent: {
+          id: creator.id,
+          username: creator.username,
+          cfHandle: creator.cfHandle,
+          rating: creator.rating,
+        },
+      });
+
+      // Start polling
+      startSubmissionPolling(io, fullMatch);
+
+    } catch (problemError) {
+      console.error('Problem selection failed:', problemError);
+      
+      io.to(`user-${socket.userId}`).emit("error", {
+        message: "Failed to find suitable problem. Please try again.",
+      });
+      io.to(`user-${duel.creatorId}`).emit("error", {
+        message: "Failed to find suitable problem. Please try again.",
+      });
+    }
+
+  } catch (error) {
+    console.error("Join duel error:", error);
+    socket.emit("error", {
+      message: error.message || "Failed to join duel",
+    });
+  }
+});
 
     // Give Up - Player forfeits the match
     socket.on("give-up", async (data) => {
