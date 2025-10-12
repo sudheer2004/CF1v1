@@ -72,7 +72,7 @@ const fetchUserAttemptedProblems = async (cfHandle) => {
       params: {
         handle: cfHandle,
         from: 1,
-        count: 500, // Fetch more submissions for better coverage
+        count: 10000, // Max allowed by Codeforces API (increased from 500)
       },
     });
 
@@ -243,8 +243,20 @@ const selectRandomUnsolvedProblem = async (
     return selectRandomFromArray(problems);
   }
 
-  // FALLBACK 4: Allow attempted problems (last resort)
-  console.log('⚠️ WARNING: All unattempted problems exhausted, allowing attempted problems...');
+  // FALLBACK 4: Dramatically expand rating range (still filter attempted)
+  console.log('⚠️ FINAL FALLBACK: Dramatically expanding rating range...');
+  problems = await getFilteredProblems(
+    800, 3500, [], null,
+    player1Attempted, player2Attempted
+  );
+
+  if (problems.length > 0) {
+    console.log(`✅ Found ${problems.length} problems with max rating range`);
+    return selectRandomFromArray(problems);
+  }
+
+  // FALLBACK 5: Allow attempted problems (absolute last resort)
+  console.log('⚠️ CRITICAL: All unattempted problems exhausted, allowing attempted problems...');
   problems = await getFilteredProblems(ratingMin, ratingMax, [], null);
 
   if (problems.length > 0) {
@@ -415,6 +427,6 @@ module.exports = {
   fetchUserSubmissions,
   checkProblemSolved,
   estimateProblemYear,
-  fetchUserAttemptedProblems, // NEW
-  initializeProblemsCache, // NEW - call on server start
+  fetchUserAttemptedProblems,
+  initializeProblemsCache,
 };
