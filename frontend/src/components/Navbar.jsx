@@ -9,6 +9,7 @@ export default function Navbar({ user, view, setView, onLogout }) {
     { id: 'dashboard', label: 'Dashboard', icon: Trophy },
     { id: 'matchmaking', label: 'Matchmaking', icon: Users },
     { id: 'duel', label: 'Duel Mode', icon: Swords },
+    { id: 'team-battle', label: 'Team Battle', icon: Users },
     { id: 'leaderboard', label: 'Leaderboard', icon: Award },
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'report-issues', label: 'Report Issues', icon: Flag },

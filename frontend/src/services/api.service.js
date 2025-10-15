@@ -131,6 +131,25 @@ class ApiService {
   async getLeaderboard(limit = 100, offset = 0) {
     return this.call(`/leaderboard?limit=${limit}&offset=${offset}`);
   }
-}
+   async getActiveTeamBattle() {
+    return this.call('/team-battle/active');
+  }
 
+  async joinTeamBattle(battleCode) {
+    return this.call(`/team-battle/${battleCode}/join`, {
+      method: 'POST',
+    });
+  }
+
+  async leaveTeamBattle(battleId) {
+    return this.call(`/team-battle/${battleId}/leave`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getTeamBattle(battleCode) {
+    return this.call(`/team-battle/${battleCode}`);
+  }
+}
+ 
 export default new ApiService();

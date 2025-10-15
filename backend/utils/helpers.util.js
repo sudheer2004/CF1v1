@@ -8,6 +8,16 @@ const generateDuelCode = () => {
   return code;
 };
 
+// Generate random room code (8 characters) - alias for team battles
+const generateRoomCode = (length = 8) => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < length; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+};
+
 // Format problem ID (contestId-index)
 const formatProblemId = (contestId, index) => {
   return `${contestId}-${index}`;
@@ -31,6 +41,7 @@ const hasCommonElement = (arr1, arr2) => {
 
 module.exports = {
   generateDuelCode,
+  generateRoomCode,
   formatProblemId,
   parseProblemId,
   getCodeforcesUrl,

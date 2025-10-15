@@ -6,6 +6,9 @@ const submissionService = require("../services/submission.service");
 const ratingService = require("../services/rating.service");
 const userService = require("../services/user.service");
 const messageService = require("../services/message.service");
+const teamBattleService = require('../services/teamBattle.service');
+const teamBattlePollingService = require('../services/teamBattlePolling.service');
+const { initializeTeamBattleSocket, startExpiredBattlesCheck } = require('./teamBattle.socket');
 const { verifyToken } = require("../utils/jwt.util");
 const {
   formatProblemId,
@@ -123,6 +126,9 @@ const cancelExistingMatch = async (io, userId) => {
 };
 
 const initializeSocket = (io) => {
+  // Start checking for expired team battles
+  startExpiredBattlesCheck(io);
+
   io.on("connection", (socket) => {
    
 
@@ -905,6 +911,9 @@ const initializeSocket = (io) => {
         socket.emit("error", { message: "Failed to send message" });
       }
     });
+
+    // ===== TEAM BATTLE SOCKET HANDLERS =====
+    initializeTeamBattleSocket(io, socket);
 
     socket.on("disconnect", async () => {
     

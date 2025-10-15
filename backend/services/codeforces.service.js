@@ -419,11 +419,110 @@ const initializeProblemsCache = async () => {
   }
 };
 
+/**
+ * Select random unsolved problem for team battle
+ * Similar to selectRandomUnsolvedProblem but accepts multiple CF handles
+ */
+const selectRandomUnsolvedProblemForTeamBattle = async (
+  ratingMin,
+  ratingMax,
+  tags,
+  minYear,
+  cfHandles
+) => {
+  console.log('\n🎯 Selecting problem for team battle...');
+  console.log('   Rating range:', ratingMin, '-', ratingMax);
+  console.log('   Players:', cfHandles.join(', '));
+
+  // Fetch attempted problems for all players in parallel
+  const attemptedSets = await Promise.all(
+    cfHandles.map(handle => fetchUserAttemptedProblems(handle))
+  );
+
+  // Combine all attempted problems
+  const combinedAttempted = new Set();
+  attemptedSets.forEach(set => {
+    set.forEach(problemId => combinedAttempted.add(problemId));
+  });
+
+  console.log(`   Total attempted problems: ${combinedAttempted.size}`);
+
+  // Try with all filters
+  let problems = await getFilteredProblems(
+    ratingMin,
+    ratingMax,
+    tags,
+    minYear,
+    combinedAttempted,
+    new Set() // Don't need second player set
+  );
+
+  if (problems.length > 0) {
+    console.log(`✅ Found ${problems.length} suitable problems`);
+    return selectRandomFromArray(problems);
+  }
+
+  // Fallback: Try without year filter
+  if (minYear) {
+    console.log('   ⚠️ Retrying without year filter...');
+    problems = await getFilteredProblems(
+      ratingMin,
+      ratingMax,
+      tags,
+      null,
+      combinedAttempted,
+      new Set()
+    );
+
+    if (problems.length > 0) {
+      console.log(`✅ Found ${problems.length} problems without year filter`);
+      return selectRandomFromArray(problems);
+    }
+  }
+
+  // Fallback: Try without tags
+  if (tags && tags.length > 0) {
+    console.log('   ⚠️ Retrying without tags...');
+    problems = await getFilteredProblems(
+      ratingMin,
+      ratingMax,
+      [],
+      null,
+      combinedAttempted,
+      new Set()
+    );
+
+    if (problems.length > 0) {
+      console.log(`✅ Found ${problems.length} problems without tags`);
+      return selectRandomFromArray(problems);
+    }
+  }
+
+  // Last resort: Select any problem in rating range (ignore attempted)
+  console.log('   ⚠️ Last resort: ignoring attempted problems...');
+  problems = await getFilteredProblems(
+    ratingMin,
+    ratingMax,
+    [],
+    null,
+    new Set(),
+    new Set()
+  );
+
+  if (problems.length === 0) {
+    throw new Error(`No problems found in rating range ${ratingMin}-${ratingMax}`);
+  }
+
+  console.log(`✅ Found ${problems.length} problems (last resort)`);
+  return selectRandomFromArray(problems);
+};
+
 module.exports = {
   fetchAllProblems,
   getFilteredProblems,
   selectRandomProblem, // Legacy
-  selectRandomUnsolvedProblem, // Use this for matches
+  selectRandomUnsolvedProblem, // Use this for 1v1 matches
+  selectRandomUnsolvedProblemForTeamBattle, // Use this for team battles
   fetchUserSubmissions,
   checkProblemSolved,
   estimateProblemYear,

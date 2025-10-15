@@ -16,6 +16,7 @@ const duelRoutes = require('./routes/duel.routes');
 const profileRoutes = require('./routes/profile.routes');
 const leaderboardRoutes = require('./routes/leaderboard.routes');
 const matchRoutes = require('./routes/match.routes');
+const teamBattleRoutes = require('./routes/teamBattle.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -131,6 +132,7 @@ app.use('/api/duel', duelRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/matches', matchRoutes);
+app.use('/api/team-battle', teamBattleRoutes);
 
 // ===== 404 HANDLER =====
 app.use((req, res) => {

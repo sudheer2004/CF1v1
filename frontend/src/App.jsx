@@ -5,6 +5,7 @@ import Navbar from './components/Navbar';
 import Dashboard from './components/Dashboard';
 import Matchmaking from './components/Matchmaking';
 import DuelMode from './components/DuelMode';
+import TeamBattle from './components/TeamBattle';
 import Leaderboard from './components/Leaderboard';
 import Profile from './components/Profile';
 import ReportIssues from './components/ReportIssues';
@@ -398,6 +399,13 @@ export default function App() {
                 setMatchTimer={setMatchTimer}
                 matchAttempts={matchAttempts}
                 setMatchAttempts={setMatchAttempts}
+              />
+            )}
+            {view === 'team-battle' && (
+              <TeamBattle
+                user={user}
+                socket={socket}
+                socketReady={socketReady}
               />
             )}
             {view === 'leaderboard' && <Leaderboard />}

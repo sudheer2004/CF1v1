@@ -137,3 +137,117 @@ model Message {
 
   @@index([matchId, createdAt])
 }
+
+// ==================== TEAM BATTLE MODELS ====================
+
+// Team Battle Room
+model TeamBattle {
+  id            String   @id @default(uuid())
+  battleCode    String   @unique // 8-character room code
+  creatorId     String
+  
+  // Settings
+  duration      Int      // Match duration in minutes
+  numProblems   Int      // Number of problems (1-6)
+  
+  // Status
+  status        String   @default("waiting") // waiting, active, completed, cancelled
+  
+  startTime     DateTime?
+  endTime       DateTime?
+  
+  // Winner (null = draw)
+  winningTeam   String?  // "A" or "B" or null
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  players       TeamBattlePlayer[]
+  problems      TeamBattleProblem[]
+  
+  @@index([battleCode])
+  @@index([status])
+  @@index([creatorId])
+}
+
+// Team Battle Player
+model TeamBattlePlayer {
+  id          String      @id @default(uuid())
+  battleId    String
+  battle      TeamBattle  @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  
+  userId      String
+  username    String
+  cfHandle    String
+  rating      Int
+  
+  team        String      // "A" or "B"
+  position    Int         // 0-3 (slot position)
+  isCreator   Boolean     @default(false)
+  
+  createdAt   DateTime    @default(now())
+  
+  @@unique([battleId, userId])
+  @@index([battleId, team])
+}
+
+// Team Battle Problem Configuration
+model TeamBattleProblem {
+  id            String      @id @default(uuid())
+  battleId      String
+  battle        TeamBattle  @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  
+  problemIndex  Int         // 0-5 (problem number)
+  points        Int         @default(100) // Points for this problem
+  
+  // Problem source configuration
+  useCustomLink Boolean     @default(false)
+  customLink    String?
+  
+  // Rating-based configuration
+  rating        Int?
+  useRange      Boolean     @default(false)
+  ratingMin     Int?
+  ratingMax     Int?
+  minYear       Int?
+  
+  // Selected problem (filled when match starts)
+  contestId     Int?
+  problemIndexChar String?   // "A", "B", "C", etc.
+  problemName   String?
+  problemRating Int?
+  problemUrl    String?
+  
+  // Solving status
+  solvedBy      String?     // "A" or "B" or null
+  solvedByUserId String?
+  solvedByUsername String?
+  solvedAt      DateTime?
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  
+  @@unique([battleId, problemIndex])
+  @@index([battleId])
+}
+
+// Team Battle Attempt Tracking
+model TeamBattleAttempt {
+  id          String   @id @default(uuid())
+  battleId    String
+  userId      String
+  username    String
+  team        String   // "A" or "B"
+  problemIndex Int
+  
+  submissionId Int     // Codeforces submission ID
+  verdict     String   // OK, WRONG_ANSWER, etc.
+  timestamp   DateTime
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([battleId, userId])
+  @@index([battleId, problemIndex])
+  @@unique([battleId, submissionId])
+}
