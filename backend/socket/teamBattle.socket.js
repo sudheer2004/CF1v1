@@ -15,66 +15,73 @@ const initializeTeamBattleSocket = (io, socket) => {
   /**
    * Create team battle room
    */
-  socket.on('create-team-battle', async (data) => {
-    try {
-      if (!socket.userId) {
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
-      }
-
-      const { duration, numProblems, problems } = data;
-
-      // Validation
-      if (!duration || !numProblems || !problems) {
-        socket.emit('error', { message: 'Missing required fields' });
-        return;
-      }
-
-      // Fetch user data from database
-      const user = await prisma.user.findUnique({
-        where: { id: socket.userId },
-        select: {
-          id: true,
-          username: true,
-          cfHandle: true,
-          rating: true,
-        },
-      });
-
-      if (!user) {
-        socket.emit('error', { message: 'User not found' });
-        return;
-      }
-
-      const battle = await teamBattleService.createBattle(
-        socket.userId,
-        {
-          username: user.username,
-          cfHandle: user.cfHandle || user.username,
-          rating: user.rating || 0,
-        },
-        {
-          duration,
-          numProblems,
-          problems,
-        }
-      );
-
-      // Add to memory store
-      battleMemory.addBattle(battle);
-
-      // Join socket room
-      socket.join(`team-battle-${battle.battleCode}`);
-      socket.join(`team-battle-${battle.id}`);
-
-      console.log(`✅ Team battle created: ${battle.battleCode} by ${user.username}`);
-
-      socket.emit('team-battle-created', { battle });
-    } catch (error) {
-      console.error('Create team battle error:', error);
-      socket.emit('error', { message: error.message || 'Failed to create team battle' });
+socket.on('create-team-battle', async (data) => {
+  try {
+    if (!socket.userId) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
     }
-  });
+
+    const { duration, numProblems, problems, winningStrategy } = data; // UPDATED: Added winningStrategy
+
+    // Validation
+    if (!duration || !numProblems || !problems) {
+      socket.emit('error', { message: 'Missing required fields' });
+      return;
+    }
+
+    // Validate winning strategy
+    if (winningStrategy && !['first-solve', 'total-solves'].includes(winningStrategy)) {
+      socket.emit('error', { message: 'Invalid winning strategy' });
+      return;
+    }
+
+    // Fetch user data from database
+    const user = await prisma.user.findUnique({
+      where: { id: socket.userId },
+      select: {
+        id: true,
+        username: true,
+        cfHandle: true,
+        rating: true,
+      },
+    });
+
+    if (!user) {
+      socket.emit('error', { message: 'User not found' });
+      return;
+    }
+
+    const battle = await teamBattleService.createBattle(
+      socket.userId,
+      {
+        username: user.username,
+        cfHandle: user.cfHandle || user.username,
+        rating: user.rating || 0,
+      },
+      {
+        duration,
+        numProblems,
+        problems,
+        winningStrategy: winningStrategy || 'first-solve', // UPDATED: Pass winning strategy
+      }
+    );
+
+    // Add to memory store
+    battleMemory.addBattle(battle);
+
+    // Join socket room
+    socket.join(`team-battle-${battle.battleCode}`);
+    socket.join(`team-battle-${battle.id}`);
+
+    console.log(`✅ Team battle created: ${battle.battleCode} by ${user.username} (${winningStrategy || 'first-solve'} mode)`);
+
+    socket.emit('team-battle-created', { battle });
+  } catch (error) {
+    console.error('Create team battle error:', error);
+    socket.emit('error', { message: error.message || 'Failed to create team battle' });
+  }
+});
 
   /**
    * Join team battle room - FIXED FOR INSTANT UPDATES
@@ -527,12 +534,12 @@ async function selectProblemsForBattle(battle) {
 /**
  * Start polling for battle submissions - OPTIMIZED
  */
+
 function startBattlePolling(io, battle) {
   const pollInterval = parseInt(process.env.SUBMISSION_POLL_INTERVAL_SECONDS) || 10;
 
-  console.log(`🔄 Starting polling for team battle: ${battle.battleCode}`);
+  console.log(`🔄 Starting polling for team battle: ${battle.battleCode} (${battle.winningStrategy} mode)`);
 
-  // Clear existing poll if any
   if (activePolls.has(battle.id)) {
     clearInterval(activePolls.get(battle.id));
     console.log('Cleared existing poll');
@@ -545,11 +552,9 @@ function startBattlePolling(io, battle) {
     console.log(`\n🔄 POLL #${pollCount} at ${new Date().toLocaleTimeString()}`);
     
     try {
-      // Get from memory first
       let currentBattle = battleMemory.getBattleById(battle.id);
       
       if (!currentBattle) {
-        // Fallback to database
         currentBattle = await prisma.teamBattle.findUnique({
           where: { id: battle.id },
           include: {
@@ -593,64 +598,90 @@ function startBattlePolling(io, battle) {
 
       console.log(`📊 Found ${results.length} new solve(s) in battle ${currentBattle.battleCode}`);
 
-      // Update memory FIRST for instant feedback
-      let memoryUpdated = false;
-      for (const result of results) {
-        const { updated } = battleMemory.updateProblemSolved(
-          currentBattle.id,
-          result.problemIndex,
-          result.solvedBy,
-          result.userId,
-          result.username
-        );
+      // Check for early completion (total-solves mode)
+      const earlyCompletion = results.find(r => r.allProblemsCompleted);
+      
+      if (earlyCompletion) {
+        console.log(`🏆 Team ${earlyCompletion.completedTeam} completed ALL problems early!`);
         
-        if (updated) {
-          memoryUpdated = true;
-        }
+        const stats = await teamBattleService.getBattleStats(currentBattle.id);
+        const updatedBattle = await teamBattleService.getBattleWithDetails(currentBattle.id);
+
+        // Emit one final update
+        io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
+          battle: updatedBattle,
+          stats,
+          newSolves: results.filter(r => !r.allProblemsCompleted),
+        });
+
+        // End battle immediately
+        await handleBattleEnd(io, updatedBattle, earlyCompletion.completedTeam);
+        stopBattlePolling(battle.id);
+        return;
       }
 
-      if (memoryUpdated) {
-        // Get updated battle from memory
-        const updatedBattle = battleMemory.getBattleById(currentBattle.id);
-        
-        // Calculate stats from memory
-        const stats = {
-          teamAScore: updatedBattle.problems.filter(p => p.solvedBy === 'A').reduce((sum, p) => sum + p.points, 0),
-          teamBScore: updatedBattle.problems.filter(p => p.solvedBy === 'B').reduce((sum, p) => sum + p.points, 0),
-          problemsSolved: {
-            teamA: updatedBattle.problems.filter(p => p.solvedBy === 'A').length,
-            teamB: updatedBattle.problems.filter(p => p.solvedBy === 'B').length,
+      // Regular update logic
+      if (currentBattle.winningStrategy === 'first-solve') {
+        let memoryUpdated = false;
+        for (const result of results) {
+          const { updated } = battleMemory.updateProblemSolved(
+            currentBattle.id,
+            result.problemIndex,
+            result.solvedBy,
+            result.userId,
+            result.username
+          );
+          
+          if (updated) {
+            memoryUpdated = true;
           }
-        };
+        }
 
-        console.log(`📢 Emitting update for battle ${currentBattle.battleCode}`);
+        if (memoryUpdated) {
+          const updatedBattle = battleMemory.getBattleById(currentBattle.id);
+          
+          const stats = {
+            teamAScore: updatedBattle.problems.filter(p => p.solvedBy === 'A').reduce((sum, p) => sum + p.points, 0),
+            teamBScore: updatedBattle.problems.filter(p => p.solvedBy === 'B').reduce((sum, p) => sum + p.points, 0),
+            problemsSolved: {
+              teamA: updatedBattle.problems.filter(p => p.solvedBy === 'A').length,
+              teamB: updatedBattle.problems.filter(p => p.solvedBy === 'B').length,
+            }
+          };
+
+          console.log(`📢 Emitting update for battle ${currentBattle.battleCode}`);
+          console.log(`   Team A: ${stats.teamAScore} pts | Team B: ${stats.teamBScore} pts`);
+
+          io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
+            battle: updatedBattle,
+            stats,
+            newSolves: results,
+          });
+
+          // Check if all problems solved
+          const allSolved = updatedBattle.problems.every(p => p.solvedBy !== null);
+          if (allSolved) {
+            console.log(`✅ All problems solved in battle ${battle.battleCode}`);
+            await handleBattleEnd(io, updatedBattle);
+            stopBattlePolling(battle.id);
+          }
+        }
+      } else {
+        // Total-solves mode: Get fresh stats from database
+        const stats = await teamBattleService.getBattleStats(currentBattle.id);
+        const updatedBattle = await teamBattleService.getBattleWithDetails(currentBattle.id);
+
+        console.log(`📢 Emitting update for battle ${currentBattle.battleCode} (total-solves)`);
         console.log(`   Team A: ${stats.teamAScore} pts | Team B: ${stats.teamBScore} pts`);
 
-        // 🚀 INSTANT BROADCAST from memory
         io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
           battle: updatedBattle,
           stats,
           newSolves: results,
         });
 
-        // Update database async
-        for (const result of results) {
-          teamBattleService.updateProblemSolved(
-            currentBattle.id,
-            result.problemIndex,
-            result.solvedBy,
-            result.userId,
-            result.username
-          ).catch(err => console.error('❌ Database update failed:', err));
-        }
-
-        // Check if all problems solved
-        const allSolved = updatedBattle.problems.every(p => p.solvedBy !== null);
-        if (allSolved) {
-          console.log(`✅ All problems solved in battle ${battle.battleCode}`);
-          await handleBattleEnd(io, updatedBattle);
-          stopBattlePolling(battle.id);
-        }
+        // Update memory
+        battleMemory.addBattle(updatedBattle);
       }
     } catch (error) {
       console.error(`❌ Polling error for battle ${battle.id}:`, error.message);
@@ -675,40 +706,30 @@ function stopBattlePolling(battleId) {
 /**
  * Handle battle end
  */
-async function handleBattleEnd(io, battle) {
+async function handleBattleEnd(io, battle, earlyWinner = null) {
   try {
-    console.log(`🏁 Ending battle: ${battle.battleCode}`);
+    console.log(`🏁 Ending battle: ${battle.battleCode} (${battle.winningStrategy} mode)`);
 
-    // Get stats from memory
-    const memoryBattle = battleMemory.getBattleById(battle.id);
-    let stats;
-    
-    if (memoryBattle) {
-      stats = {
-        teamAScore: memoryBattle.problems.filter(p => p.solvedBy === 'A').reduce((sum, p) => sum + p.points, 0),
-        teamBScore: memoryBattle.problems.filter(p => p.solvedBy === 'B').reduce((sum, p) => sum + p.points, 0),
-        problemsSolved: {
-          teamA: memoryBattle.problems.filter(p => p.solvedBy === 'A').length,
-          teamB: memoryBattle.problems.filter(p => p.solvedBy === 'B').length,
+    const stats = await teamBattleService.getBattleStats(battle.id);
+    let winningTeam = earlyWinner; // If provided, this team completed all problems
+
+    if (!winningTeam) {
+      // Normal completion or time expired
+      if (battle.winningStrategy === 'first-solve') {
+        // Simple comparison
+        if (stats.teamAScore > stats.teamBScore) {
+          winningTeam = 'A';
+        } else if (stats.teamBScore > stats.teamAScore) {
+          winningTeam = 'B';
         }
-      };
-    } else {
-      // Fallback to database stats if not in memory
-      stats = await teamBattleService.getBattleStats(battle.id);
+      } else {
+        // Total-solves mode with tie-breaking
+        winningTeam = teamBattleService.determineWinnerWithTieBreak(stats);
+      }
     }
-
-    let winningTeam = null;
-
-    if (stats.teamAScore > stats.teamBScore) {
-      winningTeam = 'A';
-    } else if (stats.teamBScore > stats.teamAScore) {
-      winningTeam = 'B';
-    }
-    // else: Draw (winningTeam = null)
 
     await teamBattleService.completeBattle(battle.id, winningTeam);
 
-    // Update memory
     battleMemory.updateBattleStatus(battle.id, 'completed', { winningTeam });
 
     const finalBattle = battleMemory.getBattleById(battle.id) || await teamBattleService.getBattleWithDetails(battle.id);
@@ -719,9 +740,15 @@ async function handleBattleEnd(io, battle) {
       stats,
       winningTeam,
       isDraw: winningTeam === null,
+      earlyCompletion: earlyWinner !== null,
     });
 
     console.log(`✅ Battle ${battle.battleCode} completed. Winner: ${winningTeam || 'DRAW'}`);
+    console.log(`   Final Score - Team A: ${stats.teamAScore} | Team B: ${stats.teamBScore}`);
+    
+    if (battle.winningStrategy === 'total-solves' && winningTeam && !earlyWinner) {
+      console.log(`   🏁 Tie-breaker used: Team ${winningTeam} had faster last solve`);
+    }
 
     // Remove from memory after a delay
     setTimeout(() => {
@@ -732,7 +759,6 @@ async function handleBattleEnd(io, battle) {
     console.error('Handle battle end error:', error);
   }
 }
-
 /**
  * Check for expired battles periodically
  */
@@ -791,4 +817,6 @@ module.exports = {
   initializeTeamBattleSocket,
   startExpiredBattlesCheck,
   stopBattlePolling,
+  handleBattleEnd, 
+  startBattlePolling
 };

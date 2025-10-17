@@ -8,7 +8,7 @@ const battleMemory = require('../socket/teamBattleMemory');
 exports.createTeamBattle = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { duration, numProblems, problems } = req.body;
+    const { duration, numProblems, problems, winningStrategy } = req.body; // UPDATED: Added winningStrategy
 
     if (!duration || !numProblems || !problems || !Array.isArray(problems)) {
       return res.status(400).json({ 
@@ -35,6 +35,14 @@ exports.createTeamBattle = async (req, res) => {
       return res.status(400).json({ 
         success: false, 
         message: 'Duration must be between 15 and 180 minutes' 
+      });
+    }
+
+    // UPDATED: Validate winning strategy
+    if (winningStrategy && !['first-solve', 'total-solves'].includes(winningStrategy)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid winning strategy. Must be "first-solve" or "total-solves"' 
       });
     }
 
@@ -78,6 +86,7 @@ exports.createTeamBattle = async (req, res) => {
       duration,
       numProblems,
       problems,
+      winningStrategy: winningStrategy || 'first-solve', // UPDATED: Pass winning strategy with default
     });
 
     res.status(201).json({

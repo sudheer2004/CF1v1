@@ -138,7 +138,7 @@ model Message {
   @@index([matchId, createdAt])
 }
 
-// ==================== TEAM BATTLE MODELS ====================
+// ==================== TEAM BATTLE MODELS (UPDATED) ====================
 
 // Team Battle Room
 model TeamBattle {
@@ -149,6 +149,7 @@ model TeamBattle {
   // Settings
   duration      Int      // Match duration in minutes
   numProblems   Int      // Number of problems (1-6)
+  winningStrategy String @default("first-solve") // NEW: "first-solve" or "total-solves"
   
   // Status
   status        String   @default("waiting") // waiting, active, completed, cancelled
@@ -165,6 +166,7 @@ model TeamBattle {
   // Relations
   players       TeamBattlePlayer[]
   problems      TeamBattleProblem[]
+  solves        TeamBattleProblemSolve[] // NEW: for total-solves tracking
   
   @@index([battleCode])
   @@index([status])
@@ -219,7 +221,7 @@ model TeamBattleProblem {
   problemRating Int?
   problemUrl    String?
   
-  // Solving status
+  // Solving status (for first-solve mode)
   solvedBy      String?     // "A" or "B" or null
   solvedByUserId String?
   solvedByUsername String?
@@ -230,6 +232,26 @@ model TeamBattleProblem {
   
   @@unique([battleId, problemIndex])
   @@index([battleId])
+}
+
+// NEW: Team Battle Problem Solve (for total-solves mode)
+model TeamBattleProblemSolve {
+  id            String      @id @default(uuid())
+  battleId      String
+  battle        TeamBattle  @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  
+  problemIndex  Int         // Which problem was solved
+  userId        String      // Who solved it
+  username      String
+  team          String      // "A" or "B"
+  points        Int         // Points earned
+  solvedAt      DateTime
+  
+  createdAt     DateTime    @default(now())
+  
+  @@unique([battleId, problemIndex, userId]) // Each user can only solve each problem once
+  @@index([battleId, team])
+  @@index([battleId, problemIndex])
 }
 
 // Team Battle Attempt Tracking
