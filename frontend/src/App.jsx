@@ -23,13 +23,22 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [socket, setSocket] = useState(null);
   const [socketReady, setSocketReady] = useState(false);
+  
+  // Match states
   const [activeMatch, setActiveMatch] = useState(null);
   const [matchResult, setMatchResult] = useState(null);
   const [matchTimer, setMatchTimer] = useState(0);
   const [matchAttempts, setMatchAttempts] = useState({ player1: 0, player2: 0 });
+  
+  // Team Battle states (NEW - following same pattern as matches)
+  const [activeTeamBattle, setActiveTeamBattle] = useState(null);
+  const [teamBattleStats, setTeamBattleStats] = useState(null);
+  const [teamBattleTimer, setTeamBattleTimer] = useState(0);
+  
   const [error, setError] = useState(null);
 
   const matchEndHandledRef = useRef(false);
+  const teamBattleEndHandledRef = useRef(false); // NEW
 
   // Check authentication on mount
   useEffect(() => {
@@ -172,9 +181,7 @@ export default function App() {
       try {
         const matchResponse = await api.getActiveMatch();
         
-        // ✅ NEW: Check for endTime instead of remainingTime
         if (matchResponse.match && matchResponse.match.endTime) {
-          
           setActiveMatch({
             match: matchResponse.match,
             opponent: matchResponse.opponent,
@@ -195,9 +202,37 @@ export default function App() {
     return () => clearInterval(pollInterval);
   }, [user, activeMatch, matchResult, view]);
 
-  // ============================================
-  // 🔥 INDUSTRY STANDARD TIMER (endTime-based)
-  // ============================================
+  // NEW: Poll for active team battle (fallback - same pattern as matches)
+  useEffect(() => {
+    if (!user || activeTeamBattle) return;
+    if (view !== 'team-battle') return;
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        const battleResponse = await api.getActiveTeamBattle();
+        
+        if (battleResponse.battle) {
+          devLog('📥 Poll: Restored team battle:', battleResponse.battle);
+          
+          setActiveTeamBattle(battleResponse.battle);
+          setTeamBattleStats(battleResponse.stats);
+          
+          // Join socket room for real-time updates
+          if (socket && socketReady) {
+            socket.emit('join-team-battle-room', { 
+              battleCode: battleResponse.battle.battleCode 
+            });
+          }
+        }
+      } catch (err) {
+        // No active team battle
+      }
+    }, 5000);
+
+    return () => clearInterval(pollInterval);
+  }, [user, activeTeamBattle, view, socket, socketReady]);
+
+  // Match timer (endTime-based)
   useEffect(() => {
     if (!activeMatch?.match?.endTime) {
       setMatchTimer(0);
@@ -206,19 +241,14 @@ export default function App() {
 
     matchEndHandledRef.current = false;
 
-    // Calculate remaining time from server's endTime
     const calculateRemaining = () => {
       const now = Date.now();
       const remaining = Math.max(0, Math.floor((activeMatch.match.endTime - now) / 1000));
       return remaining;
     };
 
-    // Set initial timer
     setMatchTimer(calculateRemaining());
-    
-  
 
-    // Update every second
     const interval = setInterval(() => {
       const remaining = calculateRemaining();
       setMatchTimer(remaining);
@@ -227,14 +257,45 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeMatch?.match?.endTime]);
 
-  // Handle timer expiry
+  // NEW: Team Battle timer (endTime-based - same pattern as matches)
+  useEffect(() => {
+    if (!activeTeamBattle?.endTime) {
+      setTeamBattleTimer(0);
+      return;
+    }
+
+    teamBattleEndHandledRef.current = false;
+
+    const calculateRemaining = () => {
+      const now = Date.now();
+      const endTime = typeof activeTeamBattle.endTime === 'number' 
+        ? activeTeamBattle.endTime 
+        : new Date(activeTeamBattle.endTime).getTime();
+      const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
+      return remaining;
+    };
+
+    setTeamBattleTimer(calculateRemaining());
+    
+    devLog('🔥 Team Battle Timer Started:', {
+      endTime: activeTeamBattle.endTime,
+      initialRemaining: calculateRemaining()
+    });
+
+    const interval = setInterval(() => {
+      const remaining = calculateRemaining();
+      setTeamBattleTimer(remaining);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTeamBattle?.endTime]);
+
+  // Handle match timer expiry
   useEffect(() => {
     if (!activeMatch || matchResult || matchEndHandledRef.current) return;
     
     if (matchTimer === 0) {
       matchEndHandledRef.current = true;
-      
-     
       
       const timeoutId = setTimeout(() => {
         setMatchResult({
@@ -262,7 +323,7 @@ export default function App() {
     }
   }, [matchTimer, activeMatch, matchResult, user]);
 
-  // Sync attempts periodically (no timer syncing needed!)
+  // Sync match attempts periodically
   useEffect(() => {
     if (!activeMatch || !user) return;
 
@@ -271,10 +332,7 @@ export default function App() {
         const matchResponse = await api.getActiveMatch();
         
         if (matchResponse.match && matchResponse.match.id === activeMatch.match.id) {
-          // Only update attempts, timer handles itself via endTime
           setMatchAttempts(matchResponse.attempts);
-          
-         
         }
       } catch (err) {
         // Ignore sync errors
@@ -294,7 +352,6 @@ export default function App() {
         try {
           const matchResponse = await api.getActiveMatch();
           
-          // ✅ NEW: Check for endTime instead of remainingTime
           if (matchResponse.match && matchResponse.match.endTime) {
             devLog('📥 Auth: Restored match with endTime:', matchResponse.match.endTime);
             
@@ -307,7 +364,30 @@ export default function App() {
             setMatchAttempts(matchResponse.attempts);
             setView('matchmaking');
           } else {
-            setView('dashboard');
+            // NEW: Check for active team battle
+            try {
+              const battleResponse = await api.getActiveTeamBattle();
+              
+              if (battleResponse.battle) {
+                devLog('📥 Auth: Restored team battle:', battleResponse.battle);
+                
+                setActiveTeamBattle(battleResponse.battle);
+                setTeamBattleStats(battleResponse.stats);
+                setView('team-battle');
+                
+                // Join socket room when reconnecting
+                if (socket && socketReady) {
+                  socket.emit('join-team-battle-room', { 
+                    battleCode: battleResponse.battle.battleCode 
+                  });
+                }
+              } else {
+                setView('dashboard');
+              }
+            } catch (err) {
+              devLog('⚠️ Auth: No active team battle found');
+              setView('dashboard');
+            }
           }
         } catch (err) {
           devLog('⚠️ Auth: No active match found');
@@ -334,6 +414,9 @@ export default function App() {
     setMatchResult(null);
     setMatchTimer(0);
     setMatchAttempts({ player1: 0, player2: 0 });
+    setActiveTeamBattle(null); // NEW
+    setTeamBattleStats(null); // NEW
+    setTeamBattleTimer(0); // NEW
     setError(null);
   };
 
@@ -401,13 +484,18 @@ export default function App() {
                 setMatchAttempts={setMatchAttempts}
               />
             )}
-            {view === 'team-battle' && (
-              <TeamBattle
-                user={user}
-                socket={socket}
-                socketReady={socketReady}
-              />
-            )}
+           {view === 'team-battle' && (
+            <TeamBattle
+              user={user}
+              socket={socket}
+              socketReady={socketReady}
+              activeBattle={activeTeamBattle}           // ✅ Match prop name
+              setActiveBattle={setActiveTeamBattle}     // ✅ Match prop name
+              battleStats={teamBattleStats}             // ✅ Match prop name
+              setBattleStats={setTeamBattleStats}       // ✅ Match prop name
+              // Remove teamBattleTimer prop - it's handled internally
+            />
+          )}
             {view === 'leaderboard' && <Leaderboard />}
             {view === 'profile' && <Profile user={user} setUser={setUser} />}
             {view === 'report-issues' && <ReportIssues user={user} />}

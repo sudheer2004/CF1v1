@@ -1,5 +1,6 @@
 const teamBattleService = require('../services/teamBattle.service');
 const userService = require('../services/user.service');
+const battleMemory = require('../socket/teamBattleMemory');
 
 /**
  * Create a new team battle room
@@ -9,7 +10,6 @@ exports.createTeamBattle = async (req, res) => {
     const userId = req.user.id;
     const { duration, numProblems, problems } = req.body;
 
-    // Validation
     if (!duration || !numProblems || !problems || !Array.isArray(problems)) {
       return res.status(400).json({ 
         success: false, 
@@ -38,7 +38,6 @@ exports.createTeamBattle = async (req, res) => {
       });
     }
 
-    // Validate each problem configuration
     for (let i = 0; i < problems.length; i++) {
       const prob = problems[i];
       
@@ -57,7 +56,6 @@ exports.createTeamBattle = async (req, res) => {
           });
         }
       } else {
-        // Rating-based problem
         if (prob.useRange) {
           if (!prob.ratingMin || !prob.ratingMax || prob.ratingMin > prob.ratingMax) {
             return res.status(400).json({ 
@@ -118,7 +116,6 @@ exports.getTeamBattle = async (req, res) => {
       });
     }
 
-    // Get battle stats if active or completed
     let stats = null;
     if (battle.status === 'active' || battle.status === 'completed') {
       stats = await teamBattleService.getBattleStats(battle.id);
@@ -146,6 +143,8 @@ exports.joinTeamBattle = async (req, res) => {
     const userId = req.user.id;
     const { code } = req.params;
 
+    console.log('📥 JOIN REQUEST:', { userId, code });
+
     if (!code || code.length !== 8) {
       return res.status(400).json({ 
         success: false, 
@@ -153,7 +152,6 @@ exports.joinTeamBattle = async (req, res) => {
       });
     }
 
-    // Get user info
     const user = await userService.findUserById(userId);
     
     if (!user || !user.cfHandle) {
@@ -163,6 +161,7 @@ exports.joinTeamBattle = async (req, res) => {
       });
     }
 
+    // Join battle via service
     const battle = await teamBattleService.joinBattle(
       code,
       userId,
@@ -171,18 +170,57 @@ exports.joinTeamBattle = async (req, res) => {
       user.rating
     );
 
+    console.log('✅ User joined battle (DB updated):', { 
+      userId, 
+      username: user.username, 
+      battleCode: code,
+      totalPlayers: battle.players.length 
+    });
+
+    // Update memory
+    battleMemory.addBattle(battle);
+    console.log('✅ Battle added to memory');
+
+    // ✅ CRITICAL: Broadcast to ALL players in the room
+    const io = req.app.get('io');
+    
+    if (io) {
+      console.log('📢 Broadcasting player join to room:', code);
+      console.log('   - Total players in battle:', battle.players.length);
+      console.log('   - Player names:', battle.players.map(p => p.username).join(', '));
+      
+      // Emit to everyone in the room (including the joiner)
+      io.to(`team-battle-${code}`).emit('team-battle-updated', {
+        battle: battle,
+      });
+      
+      console.log('✅ Broadcast sent to team-battle-' + code);
+      
+      // Also emit directly to the joining user (redundant but ensures they get it)
+      io.to(`team-battle-${code}`).emit('team-battle-state', {
+        battle: battle,
+      });
+      
+      console.log('✅ State update sent to team-battle-' + code);
+    } else {
+      console.error('❌ CRITICAL: IO instance not available! Cannot broadcast.');
+      console.error('   Make sure app.set("io", io) is called in server.js');
+    }
+
+    // Send response to HTTP request
     res.json({
       success: true,
       battle,
     });
   } catch (error) {
-    console.error('Join team battle error:', error);
+    console.error('❌ Join team battle error:', error);
     res.status(400).json({ 
       success: false, 
       message: error.message || 'Failed to join team battle' 
     });
   }
 };
+
 /**
  * Get team battle stats
  */
@@ -211,6 +249,7 @@ exports.getTeamBattleStats = async (req, res) => {
     });
   }
 };
+
 /**
  * Get user's active team battle
  */
@@ -218,7 +257,6 @@ exports.getActiveTeamBattle = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Find active battle where user is a player
     const prisma = require('../config/database.config');
     const activeBattle = await prisma.teamBattle.findFirst({
       where: {
@@ -248,7 +286,6 @@ exports.getActiveTeamBattle = async (req, res) => {
       });
     }
 
-    // Get stats if active
     let stats = null;
     if (activeBattle.status === 'active') {
       stats = await teamBattleService.getBattleStats(activeBattle.id);
@@ -269,16 +306,22 @@ exports.getActiveTeamBattle = async (req, res) => {
 };
 
 /**
- * Leave team battle (only in waiting status)
+ * Leave team battle
  */
 exports.leaveTeamBattle = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
 
+    console.log('🚪 LEAVE REQUEST:', { battleId: id, userId });
+
     const prisma = require('../config/database.config');
+    
     const battle = await prisma.teamBattle.findUnique({
       where: { id },
+      include: {
+        players: true,
+      },
     });
 
     if (!battle) {
@@ -295,19 +338,36 @@ exports.leaveTeamBattle = async (req, res) => {
       });
     }
 
-    // If user is creator, delete the entire battle
+    const io = req.app.get('io');
+
+    // If creator leaves, delete the entire battle
     if (battle.creatorId === userId) {
+      console.log('🗑️ Creator leaving, deleting battle');
+
       await prisma.teamBattle.delete({
         where: { id },
       });
 
+      battleMemory.removeBattle(id);
+
+      if (io) {
+        io.to(`team-battle-${battle.battleCode}`).emit('battle-deleted', {
+          message: 'Room creator has closed the battle',
+        });
+        
+        console.log('📢 Broadcast battle-deleted to room:', battle.battleCode);
+      }
+
       return res.json({
         success: true,
         message: 'Battle deleted',
+        deleted: true,
       });
     }
 
-    // Otherwise, just remove the player
+    // Regular player leaving
+    console.log('👤 Regular player leaving...');
+
     await prisma.teamBattlePlayer.deleteMany({
       where: {
         battleId: id,
@@ -315,15 +375,48 @@ exports.leaveTeamBattle = async (req, res) => {
       },
     });
 
+    console.log('✅ Player removed from database');
+
+    // Fetch updated battle state
+    const updatedBattle = await prisma.teamBattle.findUnique({
+      where: { id },
+      include: {
+        players: {
+          orderBy: [{ team: 'asc' }, { position: 'asc' }],
+        },
+        problems: {
+          orderBy: { problemIndex: 'asc' },
+        },
+      },
+    });
+
+    if (updatedBattle) {
+      // Update memory
+      battleMemory.addBattle(updatedBattle);
+      console.log('✅ Memory updated with fresh battle data');
+      console.log('   Remaining players:', updatedBattle.players.length);
+
+      // ✅ Broadcast update to remaining players
+      if (io) {
+        io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', {
+          battle: updatedBattle,
+        });
+        console.log('📢 Broadcasted player leave to remaining players in room:', battle.battleCode);
+      } else {
+        console.warn('⚠️ IO not available, remaining players won\'t see the update immediately');
+      }
+    }
+
     res.json({
       success: true,
       message: 'Left battle successfully',
+      deleted: false,
     });
   } catch (error) {
-    console.error('Leave team battle error:', error);
+    console.error('❌ Leave team battle error:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to leave team battle' 
+      message: error.message || 'Failed to leave team battle' 
     });
   }
 };

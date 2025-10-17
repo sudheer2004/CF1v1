@@ -102,6 +102,10 @@ const io = new Server(server, {
   pingInterval: 25000,
 });
 
+// ✅ CRITICAL: Store IO in app for use in routes
+app.set('io', io);
+console.log('✅ Socket.IO instance stored in Express app');
+
 // Initialize Socket.io
 initializeSocket(io);
 
@@ -165,7 +169,7 @@ process.on('uncaughtException', (error) => {
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
- 
+  console.log(`✅ Server running on port ${PORT}`);
   
   // Warning if in development mode
   if (process.env.NODE_ENV !== 'production') {
@@ -176,16 +180,17 @@ server.listen(PORT, () => {
 
 // ===== GRACEFUL SHUTDOWN =====
 const gracefulShutdown = (signal) => {
+  console.log(`\n🛑 ${signal} received, shutting down gracefully...`);
   
   server.close(() => {
-   
+    console.log('✅ HTTP server closed');
     
     // Close database connections
     // prisma.$disconnect() if using Prisma
     
     // Close socket connections
     io.close(() => {
-     
+      console.log('✅ Socket.IO closed');
       process.exit(0);
     });
   });

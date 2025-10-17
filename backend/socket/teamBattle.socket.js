@@ -2,6 +2,7 @@ const teamBattleService = require('../services/teamBattle.service');
 const teamBattlePollingService = require('../services/teamBattlePolling.service');
 const codeforcesService = require('../services/codeforces.service');
 const prisma = require('../config/database.config');
+const battleMemory = require('./teamBattleMemory'); // ✅ FIXED: Correct filename
 
 // Store active polling intervals: battleId -> intervalId
 const activePolls = new Map();
@@ -59,6 +60,9 @@ const initializeTeamBattleSocket = (io, socket) => {
         }
       );
 
+      // Add to memory store
+      battleMemory.addBattle(battle);
+
       // Join socket room
       socket.join(`team-battle-${battle.battleCode}`);
       socket.join(`team-battle-${battle.id}`);
@@ -73,7 +77,7 @@ const initializeTeamBattleSocket = (io, socket) => {
   });
 
   /**
-   * Join team battle room
+   * Join team battle room - FIXED FOR INSTANT UPDATES
    */
   socket.on('join-team-battle-room', async (data) => {
     try {
@@ -86,12 +90,21 @@ const initializeTeamBattleSocket = (io, socket) => {
 
       console.log(`🔍 Join room request - User: ${socket.userId}, Room: ${battleCode}`);
 
-      const battle = await teamBattleService.getBattleByCode(battleCode);
+      // Try memory first, fallback to database
+      let battle = battleMemory.getBattleByCode(battleCode);
       
       if (!battle) {
-        console.log(`❌ Battle not found: ${battleCode}`);
-        socket.emit('error', { message: 'Battle not found' });
-        return;
+        console.log(`📥 Battle not in memory, fetching from database...`);
+        battle = await teamBattleService.getBattleByCode(battleCode);
+        
+        if (!battle) {
+          console.log(`❌ Battle not found: ${battleCode}`);
+          socket.emit('error', { message: 'Battle not found' });
+          return;
+        }
+
+        // Add to memory for future fast access
+        battleMemory.addBattle(battle);
       }
 
       console.log(`✅ Battle found: ${battle.id}, Players: ${battle.players.length}`);
@@ -102,8 +115,11 @@ const initializeTeamBattleSocket = (io, socket) => {
 
       console.log(`✅ User ${socket.userId} joined team battle room: ${battleCode}`);
 
-      // Emit current battle state to ALL users in the room (including the one who just joined)
-      io.to(`team-battle-${battleCode}`).emit('team-battle-state', { battle });
+      // ✅ Send current state to THIS socket
+      socket.emit('team-battle-state', { battle });
+      
+      // ✅ Broadcast to ALL users in the room (so everyone sees the update)
+      io.to(`team-battle-${battleCode}`).emit('team-battle-updated', { battle });
       
       console.log(`📢 Broadcasted updated battle state to room ${battleCode}`);
     } catch (error) {
@@ -114,7 +130,6 @@ const initializeTeamBattleSocket = (io, socket) => {
 
   /**
    * Leave team battle room
-   * NEW: Properly handle socket room cleanup when user leaves
    */
   socket.on('leave-team-battle-room', async (data) => {
     try {
@@ -139,20 +154,13 @@ const initializeTeamBattleSocket = (io, socket) => {
         socket.leave(`team-battle-${battleId}`);
         console.log(`✅ User ${socket.userId} left team battle room ID: ${battleId}`);
       }
-
-      // Optionally notify others (commented out to avoid spam)
-      // if (battleCode) {
-      //   socket.to(`team-battle-${battleCode}`).emit('player-left-room', { 
-      //     userId: socket.userId 
-      //   });
-      // }
     } catch (error) {
       console.error('Leave team battle room error:', error);
     }
   });
 
   /**
-   * Move player to different slot
+   * Move player to different slot - OPTIMIZED FOR INSTANT UPDATES
    */
   socket.on('move-team-player', async (data) => {
     try {
@@ -163,32 +171,73 @@ const initializeTeamBattleSocket = (io, socket) => {
 
       const { battleId, userId, newTeam, newPosition } = data;
 
-      const battle = await prisma.teamBattle.findUnique({
-        where: { id: battleId },
-      });
+      console.log(`🔄 Move request: User ${userId} to Team ${newTeam} Position ${newPosition}`);
+
+      // Get battle from memory first
+      let battle = battleMemory.getBattleById(battleId);
+      
+      if (!battle) {
+        battle = await teamBattleService.getBattleWithDetails(battleId);
+        if (battle) {
+          battleMemory.addBattle(battle);
+        }
+      }
 
       if (!battle) {
         socket.emit('error', { message: 'Battle not found' });
         return;
       }
 
-      // Only creator can move players
-      if (battle.creatorId !== socket.userId) {
-        socket.emit('error', { message: 'Only creator can move players' });
+      // Verify authorization
+      const isCreator = battle.creatorId === socket.userId;
+      const isMovingSelf = userId === socket.userId;
+
+      if (!isCreator && !isMovingSelf) {
+        socket.emit('error', { message: 'Not authorized to move this player' });
         return;
       }
 
-      const updatedBattle = await teamBattleService.movePlayer(
-        battleId,
-        userId,
-        newTeam,
-        newPosition
-      );
+      // Update in memory FIRST (instant)
+      try {
+        const updatedBattle = battleMemory.movePlayer(battleId, userId, newTeam, newPosition);
 
-      // Notify all players in the room
-      io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', { 
-        battle: updatedBattle 
-      });
+        // 🚀 INSTANT BROADCAST to all players
+        io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', { 
+          battle: updatedBattle 
+        });
+
+        console.log(`📢 Instant broadcast sent to room ${battle.battleCode}`);
+
+        // THEN update database asynchronously
+        teamBattleService.movePlayer(battleId, userId, newTeam, newPosition)
+          .catch(err => {
+            console.error('❌ Database update failed:', err);
+            // If database fails, refresh from database
+            teamBattleService.getBattleWithDetails(battleId)
+              .then(correctBattle => {
+                if (correctBattle) {
+                  battleMemory.addBattle(correctBattle);
+                  io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', { 
+                    battle: correctBattle 
+                  });
+                }
+              });
+          });
+
+      } catch (memoryError) {
+        console.error('❌ Memory update failed:', memoryError);
+        socket.emit('error', { message: memoryError.message });
+        
+        // Refresh from database
+        const freshBattle = await teamBattleService.getBattleWithDetails(battleId);
+        if (freshBattle) {
+          battleMemory.addBattle(freshBattle);
+          io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', { 
+            battle: freshBattle 
+          });
+        }
+      }
+
     } catch (error) {
       console.error('Move team player error:', error);
       socket.emit('error', { message: error.message });
@@ -196,47 +245,80 @@ const initializeTeamBattleSocket = (io, socket) => {
   });
 
   /**
-   * Remove player from battle
+   * Remove player from battle - FIXED
    */
   socket.on('remove-team-player', async (data) => {
-    try {
-      if (!socket.userId) {
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
-      }
-
-      const { battleId, targetUserId } = data;
-
-      const battle = await prisma.teamBattle.findUnique({
-        where: { id: battleId },
-      });
-
-      if (!battle) {
-        socket.emit('error', { message: 'Battle not found' });
-        return;
-      }
-
-      const updatedBattle = await teamBattleService.removePlayer(
-        battleId,
-        socket.userId,
-        targetUserId
-      );
-
-      // Notify all players
-      io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', { 
-        battle: updatedBattle 
-      });
-
-      // Notify removed player specifically
-      io.to(`user-${targetUserId}`).emit('removed-from-battle', {
-        battleId,
-        message: 'You have been removed from the battle',
-      });
-    } catch (error) {
-      console.error('Remove team player error:', error);
-      socket.emit('error', { message: error.message });
+  try {
+    if (!socket.userId) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
     }
-  });
+
+    const { battleId, targetUserId } = data;
+
+    console.log('🚫 Remove player request:', { battleId, targetUserId, requestedBy: socket.userId });
+
+    // Get battle from memory first
+    let battle = battleMemory.getBattleById(battleId);
+    if (!battle) {
+      battle = await teamBattleService.getBattleWithDetails(battleId);
+      if (battle) {
+        battleMemory.addBattle(battle);
+      }
+    }
+
+    if (!battle) {
+      socket.emit('error', { message: 'Battle not found' });
+      return;
+    }
+
+    if (battle.creatorId !== socket.userId) {
+      socket.emit('error', { message: 'Only creator can remove players' });
+      return;
+    }
+
+    console.log('✅ User authorized to remove player');
+
+    // Find all sockets in the room
+    const allSockets = await io.in(`team-battle-${battle.battleCode}`).fetchSockets();
+    console.log(`🔍 Found ${allSockets.length} sockets in room`);
+
+    // Notify the removed player first and remove from rooms
+    for (const clientSocket of allSockets) {
+      if (clientSocket.userId === targetUserId) {
+        console.log(`✅ Found removed player's socket, notifying them`);
+
+        clientSocket.emit('removed-from-battle', {
+          battleId,
+          battleCode: battle.battleCode,
+          message: 'You have been removed from the battle',
+        });
+
+        clientSocket.leave(`team-battle-${battle.battleCode}`);
+        clientSocket.leave(`team-battle-${battle.id}`);
+
+        console.log(`🚪 Removed user ${targetUserId} from battle rooms`);
+        break;
+      }
+    }
+
+    // Update memory AFTER removed player is notified
+    const updatedBattle = battleMemory.removePlayer(battleId, targetUserId);
+
+    console.log('📢 Broadcasting updated battle to remaining players');
+    io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', { 
+      battle: updatedBattle 
+    });
+
+    // Update database asynchronously
+    teamBattleService.removePlayer(battleId, socket.userId, targetUserId)
+      .catch(err => console.error('❌ Database remove failed:', err));
+
+  } catch (error) {
+    console.error('Remove team player error:', error);
+    socket.emit('error', { message: error.message });
+  }
+});
 
   /**
    * Start team battle
@@ -250,13 +332,21 @@ const initializeTeamBattleSocket = (io, socket) => {
 
       const { battleId } = data;
 
-      const battle = await prisma.teamBattle.findUnique({
-        where: { id: battleId },
-        include: {
-          players: true,
-          problems: true,
-        },
-      });
+      let battle = battleMemory.getBattleById(battleId);
+      
+      if (!battle) {
+        battle = await prisma.teamBattle.findUnique({
+          where: { id: battleId },
+          include: {
+            players: true,
+            problems: true,
+          },
+        });
+        
+        if (battle) {
+          battleMemory.addBattle(battle);
+        }
+      }
 
       if (!battle) {
         socket.emit('error', { message: 'Battle not found' });
@@ -290,7 +380,9 @@ const initializeTeamBattleSocket = (io, socket) => {
             problemIndexChar: problem.index,
             problemName: problem.name,
             problemRating: problem.rating,
-            problemUrl: `https://codeforces.com/contest/${problem.contestId}/problem/${problem.index}`,
+            problemUrl: problem.contestId 
+              ? `https://codeforces.com/contest/${problem.contestId}/problem/${problem.index}`
+              : null,
           },
         });
       }
@@ -304,6 +396,10 @@ const initializeTeamBattleSocket = (io, socket) => {
       // Fetch updated battle with problems
       const startedBattle = await teamBattleService.getBattleWithDetails(battleId);
 
+      // Update memory
+      battleMemory.updateBattleStatus(battleId, 'active', { startTime, endTime });
+      battleMemory.setProblems(battleId, startedBattle.problems);
+
       // Get initial stats
       const initialStats = await teamBattleService.getBattleStats(battleId);
 
@@ -316,12 +412,12 @@ const initializeTeamBattleSocket = (io, socket) => {
       });
 
       console.log(`✅ Team battle started: ${battle.battleCode}`);
-    console.log('🔄 About to call startBattlePolling...');
-    
-    // Start polling for submissions
-    startBattlePolling(io, startedBattle);
-    
-    console.log('✅ startBattlePolling call completed');
+      console.log('🔄 About to call startBattlePolling...');
+      
+      // Start polling for submissions
+      startBattlePolling(io, startedBattle);
+      
+      console.log('✅ startBattlePolling call completed');
 
     } catch (error) {
       console.error('Start team battle error:', error);
@@ -340,7 +436,12 @@ const initializeTeamBattleSocket = (io, socket) => {
 
       const { battleId } = data;
 
-      const battle = await teamBattleService.getBattleWithDetails(battleId);
+      // Try memory first
+      let battle = battleMemory.getBattleById(battleId);
+      
+      if (!battle) {
+        battle = await teamBattleService.getBattleWithDetails(battleId);
+      }
       
       if (!battle) return;
 
@@ -424,10 +525,9 @@ async function selectProblemsForBattle(battle) {
 }
 
 /**
- * Start polling for battle submissions
+ * Start polling for battle submissions - OPTIMIZED
  */
 function startBattlePolling(io, battle) {
-   console.log('🔄 startBattlePolling CALLED');
   const pollInterval = parseInt(process.env.SUBMISSION_POLL_INTERVAL_SECONDS) || 10;
 
   console.log(`🔄 Starting polling for team battle: ${battle.battleCode}`);
@@ -437,100 +537,126 @@ function startBattlePolling(io, battle) {
     clearInterval(activePolls.get(battle.id));
     console.log('Cleared existing poll');
   }
-   let pollCount = 0;
 
-const intervalId = setInterval(async () => {
-  pollCount++;
+  let pollCount = 0;
+
+  const intervalId = setInterval(async () => {
+    pollCount++;
     console.log(`\n🔄 POLL #${pollCount} at ${new Date().toLocaleTimeString()}`);
-  try {
-    // Fetch latest battle state
-    const currentBattle = await prisma.teamBattle.findUnique({
-      where: { id: battle.id },
-      include: {
-        players: true,
-        problems: true,
-      },
-    });
-
-    if (!currentBattle) {
-      console.log(`⚠️ Battle ${battle.id} not found, stopping poll`);
-      stopBattlePolling(battle.id);
-      return;
-    }
-
-    if (currentBattle.status !== 'active') {
-      console.log(`⚠️ Battle ${battle.battleCode} no longer active, stopping poll`);
-      stopBattlePolling(battle.id);
-      return;
-    }
-
-    // Check if battle expired
-    const now = new Date();
-    if (currentBattle.endTime && now >= new Date(currentBattle.endTime)) {
-      console.log(`⏱️ Battle ${battle.battleCode} time expired`);
-      await handleBattleEnd(io, currentBattle);
-      stopBattlePolling(battle.id);
-      return;
-    }
-
-    // Poll for new submissions
-    const results = await teamBattlePollingService.pollBattleSubmissions(currentBattle);
-
-    if (results.length === 0) {
-      // No new solves
-      return;
-    }
-
-    console.log(`📊 Found ${results.length} new solve(s) in battle ${currentBattle.battleCode}`);
-
-    // Update solved problems sequentially to ensure database consistency
-    let updateSuccess = false;
-    for (const result of results) {
-      const updated = await teamBattleService.updateProblemSolved(
-        currentBattle.id,
-        result.problemIndex,
-        result.solvedBy,
-        result.userId,
-        result.username
-      );
+    
+    try {
+      // Get from memory first
+      let currentBattle = battleMemory.getBattleById(battle.id);
       
-      if (updated) {
-        updateSuccess = true;
+      if (!currentBattle) {
+        // Fallback to database
+        currentBattle = await prisma.teamBattle.findUnique({
+          where: { id: battle.id },
+          include: {
+            players: true,
+            problems: true,
+          },
+        });
+
+        if (currentBattle) {
+          battleMemory.addBattle(currentBattle);
+        }
       }
-    }
 
-    // Only emit if at least one update succeeded
-    if (updateSuccess) {
-      // Small delay to ensure database replication
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Fetch updated battle data
-      const updatedBattle = await teamBattleService.getBattleWithDetails(currentBattle.id);
-      const stats = await teamBattleService.getBattleStats(currentBattle.id);
-
-      console.log(`📢 Emitting update for battle ${currentBattle.battleCode}`);
-      console.log(`   Team A: ${stats.teamAScore} pts | Team B: ${stats.teamBScore} pts`);
-
-      // Emit update to all players in the room
-      io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
-        battle: updatedBattle,
-        stats,
-        newSolves: results,
-      });
-
-      // Check if all problems solved
-      const allSolved = updatedBattle.problems.every(p => p.solvedBy !== null);
-      if (allSolved) {
-        console.log(`✅ All problems solved in battle ${battle.battleCode}`);
-        await handleBattleEnd(io, updatedBattle);
+      if (!currentBattle) {
+        console.log(`⚠️ Battle ${battle.id} not found, stopping poll`);
         stopBattlePolling(battle.id);
+        return;
       }
+
+      if (currentBattle.status !== 'active') {
+        console.log(`⚠️ Battle ${currentBattle.battleCode} no longer active, stopping poll`);
+        stopBattlePolling(battle.id);
+        return;
+      }
+
+      // Check if battle expired
+      const now = new Date();
+      if (currentBattle.endTime && now >= new Date(currentBattle.endTime)) {
+        console.log(`⏱️ Battle ${battle.battleCode} time expired`);
+        await handleBattleEnd(io, currentBattle);
+        stopBattlePolling(battle.id);
+        return;
+      }
+
+      // Poll for new submissions
+      const results = await teamBattlePollingService.pollBattleSubmissions(currentBattle);
+
+      if (results.length === 0) {
+        return;
+      }
+
+      console.log(`📊 Found ${results.length} new solve(s) in battle ${currentBattle.battleCode}`);
+
+      // Update memory FIRST for instant feedback
+      let memoryUpdated = false;
+      for (const result of results) {
+        const { updated } = battleMemory.updateProblemSolved(
+          currentBattle.id,
+          result.problemIndex,
+          result.solvedBy,
+          result.userId,
+          result.username
+        );
+        
+        if (updated) {
+          memoryUpdated = true;
+        }
+      }
+
+      if (memoryUpdated) {
+        // Get updated battle from memory
+        const updatedBattle = battleMemory.getBattleById(currentBattle.id);
+        
+        // Calculate stats from memory
+        const stats = {
+          teamAScore: updatedBattle.problems.filter(p => p.solvedBy === 'A').reduce((sum, p) => sum + p.points, 0),
+          teamBScore: updatedBattle.problems.filter(p => p.solvedBy === 'B').reduce((sum, p) => sum + p.points, 0),
+          problemsSolved: {
+            teamA: updatedBattle.problems.filter(p => p.solvedBy === 'A').length,
+            teamB: updatedBattle.problems.filter(p => p.solvedBy === 'B').length,
+          }
+        };
+
+        console.log(`📢 Emitting update for battle ${currentBattle.battleCode}`);
+        console.log(`   Team A: ${stats.teamAScore} pts | Team B: ${stats.teamBScore} pts`);
+
+        // 🚀 INSTANT BROADCAST from memory
+        io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
+          battle: updatedBattle,
+          stats,
+          newSolves: results,
+        });
+
+        // Update database async
+        for (const result of results) {
+          teamBattleService.updateProblemSolved(
+            currentBattle.id,
+            result.problemIndex,
+            result.solvedBy,
+            result.userId,
+            result.username
+          ).catch(err => console.error('❌ Database update failed:', err));
+        }
+
+        // Check if all problems solved
+        const allSolved = updatedBattle.problems.every(p => p.solvedBy !== null);
+        if (allSolved) {
+          console.log(`✅ All problems solved in battle ${battle.battleCode}`);
+          await handleBattleEnd(io, updatedBattle);
+          stopBattlePolling(battle.id);
+        }
+      }
+    } catch (error) {
+      console.error(`❌ Polling error for battle ${battle.id}:`, error.message);
+      console.error(error.stack);
     }
-  } catch (error) {
-    console.error(`❌ Polling error for battle ${battle.id}:`, error.message);
-    console.error(error.stack);
-  }
-}, pollInterval * 1000);
+  }, pollInterval * 1000);
 
   activePolls.set(battle.id, intervalId);
 }
@@ -553,7 +679,23 @@ async function handleBattleEnd(io, battle) {
   try {
     console.log(`🏁 Ending battle: ${battle.battleCode}`);
 
-    const stats = await teamBattleService.getBattleStats(battle.id);
+    // Get stats from memory
+    const memoryBattle = battleMemory.getBattleById(battle.id);
+    let stats;
+    
+    if (memoryBattle) {
+      stats = {
+        teamAScore: memoryBattle.problems.filter(p => p.solvedBy === 'A').reduce((sum, p) => sum + p.points, 0),
+        teamBScore: memoryBattle.problems.filter(p => p.solvedBy === 'B').reduce((sum, p) => sum + p.points, 0),
+        problemsSolved: {
+          teamA: memoryBattle.problems.filter(p => p.solvedBy === 'A').length,
+          teamB: memoryBattle.problems.filter(p => p.solvedBy === 'B').length,
+        }
+      };
+    } else {
+      // Fallback to database stats if not in memory
+      stats = await teamBattleService.getBattleStats(battle.id);
+    }
 
     let winningTeam = null;
 
@@ -566,7 +708,10 @@ async function handleBattleEnd(io, battle) {
 
     await teamBattleService.completeBattle(battle.id, winningTeam);
 
-    const finalBattle = await teamBattleService.getBattleWithDetails(battle.id);
+    // Update memory
+    battleMemory.updateBattleStatus(battle.id, 'completed', { winningTeam });
+
+    const finalBattle = battleMemory.getBattleById(battle.id) || await teamBattleService.getBattleWithDetails(battle.id);
 
     // Notify all players
     io.to(`team-battle-${battle.battleCode}`).emit('team-battle-ended', {
@@ -577,6 +722,12 @@ async function handleBattleEnd(io, battle) {
     });
 
     console.log(`✅ Battle ${battle.battleCode} completed. Winner: ${winningTeam || 'DRAW'}`);
+
+    // Remove from memory after a delay
+    setTimeout(() => {
+      battleMemory.removeBattle(battle.id);
+    }, 60000); // Keep in memory for 1 minute after end
+
   } catch (error) {
     console.error('Handle battle end error:', error);
   }
@@ -586,7 +737,6 @@ async function handleBattleEnd(io, battle) {
  * Check for expired battles periodically
  */
 function startExpiredBattlesCheck(io) {
-  // Add a small delay before starting to ensure all modules are loaded
   setTimeout(() => {
     setInterval(async () => {
       try {
@@ -597,6 +747,19 @@ function startExpiredBattlesCheck(io) {
           return;
         }
         
+        // Check memory first
+        const memoryBattles = battleMemory.getAllBattles();
+        const now = new Date();
+
+        for (const battle of memoryBattles) {
+          if (battle.status === 'active' && battle.endTime && now >= new Date(battle.endTime)) {
+            console.log(`⏱️ Found expired battle in memory: ${battle.battleCode}`);
+            await handleBattleEnd(io, battle);
+            stopBattlePolling(battle.id);
+          }
+        }
+
+        // Also check database for any battles not in memory
         const activeBattles = await prisma.teamBattle.findMany({
           where: { status: 'active' },
           include: {
@@ -605,9 +768,12 @@ function startExpiredBattlesCheck(io) {
           },
         });
 
-        const now = new Date();
-
         for (const battle of activeBattles) {
+          if (!battleMemory.getBattleById(battle.id)) {
+            // Not in memory, add it
+            battleMemory.addBattle(battle);
+          }
+
           if (battle.endTime && now >= new Date(battle.endTime)) {
             console.log(`⏱️ Found expired battle: ${battle.battleCode}`);
             await handleBattleEnd(io, battle);
@@ -618,7 +784,7 @@ function startExpiredBattlesCheck(io) {
         console.error('Error checking expired battles:', error);
       }
     }, 30000); // Every 30 seconds
-  }, 5000); // Wait 5 seconds before starting the interval
+  }, 5000); // Wait 5 seconds before starting
 }
 
 module.exports = {
