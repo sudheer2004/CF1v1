@@ -18,30 +18,30 @@ export default function Navbar({ user, view, setView, onLogout }) {
   return (
     <nav className="bg-gray-900/50 backdrop-blur-lg border-b border-purple-500/20 sticky top-0 z-50">
       <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-14">
           {/* Logo */}
-          <div className="flex items-center space-x-2">
-            <Code className="w-8 h-8 text-purple-400" />
-            <span className="text-xl font-bold text-white hidden sm:block">
+          <div className="flex items-center space-x-1.5">
+            <Code className="w-6 h-6 text-purple-400" />
+            <span className="text-lg font-bold text-white hidden sm:block">
               CF Duel
             </span>
           </div>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-1">
+          <div className="hidden md:flex items-center space-x-0.5">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button
                   key={item.id}
                   onClick={() => setView(item.id)}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
+                  className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg transition text-sm ${
                     view === item.id
                       ? 'bg-purple-600 text-white'
                       : 'text-gray-300 hover:bg-gray-800'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-3.5 h-3.5" />
                   <span>{item.label}</span>
                 </button>
               );
@@ -49,10 +49,10 @@ export default function Navbar({ user, view, setView, onLogout }) {
           </div>
 
           {/* User Info & Logout */}
-          <div className="flex items-center space-x-4">
-            <div className="hidden sm:flex items-center space-x-3 bg-gray-800/50 px-4 py-2 rounded-lg">
+          <div className="flex items-center space-x-2">
+            <div className="hidden sm:flex items-center space-x-2 bg-gray-800/50 px-3 py-1.5 rounded-lg">
               <div className="text-right">
-                <p className="text-sm font-medium text-white">{user.username}</p>
+                <p className="text-xs font-medium text-white">{user.username}</p>
                 <p className={`text-xs ${getRatingColor(user.rating)}`}>
                   {user.rating} • {getRatingBadge(user.rating)}
                 </p>
@@ -60,16 +60,16 @@ export default function Navbar({ user, view, setView, onLogout }) {
             </div>
             <button
               onClick={onLogout}
-              className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-800 rounded-lg transition"
+              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-800 rounded-lg transition"
               title="Logout"
             >
-              <LogOut className="w-5 h-5" />
+              <LogOut className="w-4 h-4" />
             </button>
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden p-2 text-gray-400 hover:text-white"
+              className="md:hidden p-1.5 text-gray-400 hover:text-white"
             >
-              {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
