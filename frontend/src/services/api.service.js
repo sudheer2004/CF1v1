@@ -142,17 +142,17 @@ class ApiService {
   }
 
 async leaveTeamBattle(battleId) {
-  console.log('🌐 API: Calling leave team battle endpoint:', battleId);
+  // console.log('🌐 API: Calling leave team battle endpoint:', battleId);
   
   const response = await this.call(`/team-battle/${battleId}/leave`, {
     method: 'DELETE',
   });
   
-  console.log('🌐 API: Raw response received:', response);
-  console.log('🌐 API: Response type:', typeof response);
-  console.log('🌐 API: Response keys:', Object.keys(response));
-  console.log('🌐 API: teamEliminated value:', response.teamEliminated);
-  console.log('🌐 API: teamEliminated type:', typeof response.teamEliminated);
+  // ('🌐 API: Raw response received:', response);
+  // console.log('🌐 API: Response type:', typeof response);
+  // console.log('🌐 API: Response keys:', Object.keys(response));
+  // console.log('🌐 API: teamEliminated value:', response.teamEliminated);
+  // console.log('🌐 API: teamEliminated type:', typeof response.teamEliminated);
   
   return response;
 }

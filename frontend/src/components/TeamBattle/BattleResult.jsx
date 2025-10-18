@@ -30,9 +30,9 @@ export default function BattleResult({
   if (teamEliminated && eliminatedTeam) {
     // Team was eliminated - the other team wins
     won = eliminatedTeam === 'A' ? 'B' : 'A';
-    console.log('🏆 Winner determined by team elimination:', won);
-    console.log('   Eliminated team:', eliminatedTeam);
-    console.log('   Winning team:', won);
+    // console.log('🏆 Winner determined by team elimination:', won);
+    // console.log('   Eliminated team:', eliminatedTeam);
+    // console.log('   Winning team:', won);
   } else if (battleStats.teamAScore > battleStats.teamBScore) {
     won = 'A';
   } else if (battleStats.teamBScore > battleStats.teamAScore) {
@@ -57,12 +57,12 @@ export default function BattleResult({
   const userWon = won === userTeam;
   const isDraw = won === null;
 
-  console.log('🎯 Battle Result Display:');
-  console.log('   User team:', userTeam);
-  console.log('   Winning team:', won);
-  console.log('   User won:', userWon);
-  console.log('   Is draw:', isDraw);
-  console.log('   Team eliminated:', teamEliminated);
+  // console.log('🎯 Battle Result Display:');
+  // console.log('   User team:', userTeam);
+  // console.log('   Winning team:', won);
+  // console.log('   User won:', userWon);
+  // console.log('   Is draw:', isDraw);
+  // console.log('   Team eliminated:', teamEliminated);
 
   const handleBackToMenu = async () => {
     if (isLoading) return; // Prevent double clicks

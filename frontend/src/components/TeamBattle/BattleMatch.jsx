@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Clock, Trophy, ExternalLink, Loader, Target, Zap } from "lucide-react";
 import { formatTime, getUserTeam } from "../../utils/battleHelpers";
+import GracePeriodLoading from "./GracePeriodLoading";
 
 export default function BattleMatch({
   activeBattle,
@@ -9,9 +10,31 @@ export default function BattleMatch({
   user,
   isLeaving,
   onLeave,
+  socket,
 }) {
   const userTeam = getUserTeam(activeBattle, user);
   const isFirstSolveMode = activeBattle.winningStrategy === 'first-solve';
+
+  // Grace period state
+  const [showGracePeriod, setShowGracePeriod] = useState(false);
+  const [gracePeriodSeconds, setGracePeriodSeconds] = useState(15);
+
+  // Listen for grace period event
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleGracePeriod = (data) => {
+      // console.log('⏳ Grace period started:', data);
+      setGracePeriodSeconds(data.gracePeriodSeconds || 15);
+      setShowGracePeriod(true);
+    };
+
+    socket.on('battle-grace-period', handleGracePeriod);
+
+    return () => {
+      socket.off('battle-grace-period', handleGracePeriod);
+    };
+  }, [socket]);
 
   if (!battleStats || !activeBattle.problems || activeBattle.problems.length === 0) {
     return (
@@ -22,6 +45,18 @@ export default function BattleMatch({
           <p className="text-gray-400">Setting up your arena</p>
         </div>
       </div>
+    );
+  }
+
+  // Show grace period loading screen
+  if (showGracePeriod) {
+    return (
+      <GracePeriodLoading
+        gracePeriodSeconds={gracePeriodSeconds}
+        onComplete={() => {
+          // console.log('✅ Grace period UI completed');
+        }}
+      />
     );
   }
 
@@ -37,7 +72,6 @@ export default function BattleMatch({
             }`}>
               You are on Team {userTeam}
             </div>
-            {/* Strategy Badge */}
             <div className="px-3 py-1 rounded-full bg-purple-600/30 border border-purple-500/50 flex items-center gap-2">
               {isFirstSolveMode ? (
                 <>
@@ -93,6 +127,14 @@ export default function BattleMatch({
                 </span>
               </div>
               <p className="text-gray-400 text-sm">Time Remaining</p>
+              
+              {matchTimer <= 30 && matchTimer > 0 && (
+                <div className="mt-2 px-3 py-1 bg-yellow-500/20 border border-yellow-500/50 rounded-full inline-block">
+                  <span className="text-yellow-300 text-xs font-bold animate-pulse">
+                    ⚠️ Final 30 seconds!
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className={`text-center p-4 rounded-lg ${
@@ -119,12 +161,10 @@ export default function BattleMatch({
           </h2>
 
           {activeBattle.problems.map((problem, index) => {
-            // Determine styling based on mode
             let cardStyle = 'bg-gray-800/50 border-purple-500/20 hover:border-purple-500/50';
             let problemStatus = null;
 
             if (isFirstSolveMode) {
-              // First-solve mode: Show which team solved it
               if (problem.solvedBy === 'A') {
                 cardStyle = 'bg-blue-600/20 border-blue-500/50 opacity-75';
                 problemStatus = (
@@ -143,9 +183,6 @@ export default function BattleMatch({
                 );
               }
             } else {
-              // Total-solves mode: Problem stays active, show who solved it
-              // Note: We don't have per-problem solve tracking in the problem object for total-solves
-              // You might want to add this data or fetch it separately
               problemStatus = (
                 <span className="text-green-400 font-medium text-sm">
                   🔓 Open for all teams
@@ -205,7 +242,6 @@ export default function BattleMatch({
           })}
         </div>
 
-        {/* Info box for total-solves mode */}
         {!isFirstSolveMode && (
           <div className="mt-6 bg-purple-600/20 border border-purple-500/50 rounded-lg p-4">
             <div className="flex items-start gap-3">

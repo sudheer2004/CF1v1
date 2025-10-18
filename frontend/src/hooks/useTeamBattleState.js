@@ -10,7 +10,7 @@ export const useTeamBattleState = (activeBattle, user) => {
     if (initialModeSet.current) return;
 
     if (activeBattle) {
-      console.log("📥 TeamBattle: Using battle from props (instant restore)");
+      // console.log("📥 TeamBattle: Using battle from props (instant restore)");
       setIsCreator(activeBattle.creatorId === user.id);
 
       if (activeBattle.status === "waiting") {

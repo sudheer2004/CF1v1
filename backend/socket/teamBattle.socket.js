@@ -539,53 +539,51 @@ socket.on('remove-team-player', async (data) => {
 };
 
 /**
- * Select problems from Codeforces based on battle configuration
- * FIXED: Fetches actual problem names for custom links using cached CF service
+ * FUNCTION 1: Select problems - FIXED to fetch actual problem names
+ * FIND: async function selectProblemsForBattle(battle)
+ * REPLACE WITH:
  */
 async function selectProblemsForBattle(battle) {
   const problems = battle.problems;
   const selectedProblems = [];
 
-  // Get all problems from cache (1 API call total, or 0 if cached)
+  // ✅ Get all problems from cache (1 API call or 0 if cached)
   const allCFProblems = await codeforcesService.fetchAllProblems();
 
   for (const problemConfig of problems) {
     if (problemConfig.useCustomLink) {
-      // Custom link - parse if it's a Codeforces link
       const cfMatch = problemConfig.customLink.match(/codeforces\.com\/(?:contest|problemset\/problem)\/(\d+)\/([A-Z]\d?)/i);
       
       if (cfMatch) {
         const contestId = parseInt(cfMatch[1]);
         const problemIndex = cfMatch[2].toUpperCase();
         
-        // ✅ FIXED: Find problem in cached list (no additional API call!)
+        // ✅ Find problem in cached list (no additional API call!)
         const problemData = allCFProblems.find(
           p => p.contestId === contestId && p.index === problemIndex
         );
         
         if (problemData) {
-          console.log(`✅ Found problem in cache: ${problemData.name} (Rating: ${problemData.rating || 'N/A'})`);
+          console.log(`✅ Found problem in cache: ${problemData.name}`);
           
           selectedProblems.push({
             problemIndex: problemConfig.problemIndex,
             contestId: contestId,
             index: problemIndex,
-            name: problemData.name, // ✅ Actual problem name from cache
+            name: problemData.name, // ✅ Actual name
             rating: problemData.rating || null,
           });
         } else {
-          // Fallback if problem not found in cache (rare)
-          console.warn(`⚠️ Problem ${contestId}${problemIndex} not found in cache, using fallback`);
+          console.warn(`⚠️ Problem ${contestId}${problemIndex} not in cache`);
           selectedProblems.push({
             problemIndex: problemConfig.problemIndex,
             contestId: contestId,
             index: problemIndex,
-            name: `Problem ${contestId}${problemIndex}`, // Better fallback
+            name: `Problem ${contestId}${problemIndex}`,
             rating: null,
           });
         }
       } else {
-        // External non-CF link, store as-is
         selectedProblems.push({
           problemIndex: problemConfig.problemIndex,
           contestId: null,
@@ -595,7 +593,6 @@ async function selectProblemsForBattle(battle) {
         });
       }
     } else {
-      // Select from Codeforces based on rating
       let rating, ratingMin, ratingMax;
 
       if (problemConfig.useRange) {
@@ -607,7 +604,6 @@ async function selectProblemsForBattle(battle) {
         ratingMax = rating + 100;
       }
 
-      // Get players' CF handles to avoid solved problems
       const cfHandles = battle.players.map(p => p.cfHandle).filter(Boolean);
 
       const problem = await codeforcesService.selectRandomUnsolvedProblemForTeamBattle(
@@ -631,21 +627,25 @@ async function selectProblemsForBattle(battle) {
   return selectedProblems;
 }
 
+
 /**
- * Start polling for battle submissions - OPTIMIZED
+ * FUNCTION 2: Start polling - ADDED Grace Period Logic
+ * FIND: function startBattlePolling(io, battle)
+ * REPLACE WITH:
  */
-
 function startBattlePolling(io, battle) {
-  const pollInterval = parseInt(process.env.SUBMISSION_POLL_INTERVAL_SECONDS) || 10;
+  const pollInterval = parseInt(process.env.SUBMISSION_POLL_INTERVAL_SECONDS) || 20;
+  const GRACE_PERIOD_SECONDS = 15;
 
-  console.log(`🔄 Starting polling for team battle: ${battle.battleCode} (${battle.winningStrategy} mode)`);
+  console.log(`🔄 Starting polling: ${battle.battleCode} (${battle.winningStrategy})`);
 
   if (activePolls.has(battle.id)) {
     clearInterval(activePolls.get(battle.id));
-    console.log('Cleared existing poll');
   }
 
   let pollCount = 0;
+  let gracePeriodActive = false;
+  let gracePeriodStart = null;
 
   const intervalId = setInterval(async () => {
     pollCount++;
@@ -657,70 +657,104 @@ function startBattlePolling(io, battle) {
       if (!currentBattle) {
         currentBattle = await prisma.teamBattle.findUnique({
           where: { id: battle.id },
-          include: {
-            players: true,
-            problems: true,
-          },
+          include: { players: true, problems: true },
         });
+        if (currentBattle) battleMemory.addBattle(currentBattle);
+      }
 
-        if (currentBattle) {
-          battleMemory.addBattle(currentBattle);
+      if (!currentBattle || currentBattle.status !== 'active') {
+        console.log(`⚠️ Battle inactive, stopping poll`);
+        stopBattlePolling(battle.id);
+        return;
+      }
+
+      const now = new Date();
+      const timeExpired = currentBattle.endTime && now >= new Date(currentBattle.endTime);
+
+      // ✅ START GRACE PERIOD
+      if (timeExpired && !gracePeriodActive) {
+        gracePeriodActive = true;
+        gracePeriodStart = now;
+        
+        console.log(`⏱️ TIMER EXPIRED - Grace period: ${GRACE_PERIOD_SECONDS}s`);
+        
+        io.to(`team-battle-${currentBattle.battleCode}`).emit('battle-grace-period', {
+          message: 'Time expired! Checking final submissions...',
+          gracePeriodSeconds: GRACE_PERIOD_SECONDS
+        });
+      }
+
+      // ✅ CHECK GRACE PERIOD END
+      if (gracePeriodActive) {
+        const elapsed = Math.floor((now - gracePeriodStart) / 1000);
+        console.log(`   ⏳ Grace period: ${elapsed}/${GRACE_PERIOD_SECONDS}s`);
+        
+        if (elapsed >= GRACE_PERIOD_SECONDS) {
+          console.log(`✅ Grace period complete - FINAL POLL`);
+          
+          const finalResults = await teamBattlePollingService.pollBattleSubmissions(currentBattle);
+          
+          if (finalResults.length > 0) {
+            console.log(`🎯 Found ${finalResults.length} in final poll!`);
+            
+            if (currentBattle.winningStrategy === 'first-solve') {
+              for (const result of finalResults) {
+                battleMemory.updateProblemSolved(
+                  currentBattle.id,
+                  result.problemIndex,
+                  result.solvedBy,
+                  result.userId,
+                  result.username
+                );
+              }
+            }
+            
+            const finalStats = await teamBattleService.getBattleStats(currentBattle.id);
+            const updatedBattle = battleMemory.getBattleById(currentBattle.id) || 
+                                 await teamBattleService.getBattleWithDetails(currentBattle.id);
+            
+            io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
+              battle: updatedBattle,
+              stats: finalStats,
+              newSolves: finalResults,
+              isFinalUpdate: true
+            });
+            
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+          await handleBattleEnd(io, currentBattle);
+          stopBattlePolling(battle.id);
+          return;
         }
       }
 
-      if (!currentBattle) {
-        console.log(`⚠️ Battle ${battle.id} not found, stopping poll`);
-        stopBattlePolling(battle.id);
-        return;
-      }
-
-      if (currentBattle.status !== 'active') {
-        console.log(`⚠️ Battle ${currentBattle.battleCode} no longer active, stopping poll`);
-        stopBattlePolling(battle.id);
-        return;
-      }
-
-      // Check if battle expired
-      const now = new Date();
-      if (currentBattle.endTime && now >= new Date(currentBattle.endTime)) {
-        console.log(`⏱️ Battle ${battle.battleCode} time expired`);
-        await handleBattleEnd(io, currentBattle);
-        stopBattlePolling(battle.id);
-        return;
-      }
-
-      // Poll for new submissions
+      // ✅ NORMAL POLLING (works during grace period too!)
       const results = await teamBattlePollingService.pollBattleSubmissions(currentBattle);
 
-      if (results.length === 0) {
-        return;
-      }
+      if (results.length === 0) return;
 
-      console.log(`📊 Found ${results.length} new solve(s) in battle ${currentBattle.battleCode}`);
+      console.log(`📊 Found ${results.length} solve(s)`);
 
-      // Check for early completion (total-solves mode)
       const earlyCompletion = results.find(r => r.allProblemsCompleted);
       
-      if (earlyCompletion) {
-        console.log(`🏆 Team ${earlyCompletion.completedTeam} completed ALL problems early!`);
+      if (earlyCompletion && !gracePeriodActive) {
+        console.log(`🏆 Team ${earlyCompletion.completedTeam} completed all!`);
         
         const stats = await teamBattleService.getBattleStats(currentBattle.id);
         const updatedBattle = await teamBattleService.getBattleWithDetails(currentBattle.id);
 
-        // Emit one final update
         io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
           battle: updatedBattle,
           stats,
           newSolves: results.filter(r => !r.allProblemsCompleted),
         });
 
-        // End battle immediately
         await handleBattleEnd(io, updatedBattle, earlyCompletion.completedTeam);
         stopBattlePolling(battle.id);
         return;
       }
 
-      // Regular update logic
       if (currentBattle.winningStrategy === 'first-solve') {
         let memoryUpdated = false;
         for (const result of results) {
@@ -731,10 +765,7 @@ function startBattlePolling(io, battle) {
             result.userId,
             result.username
           );
-          
-          if (updated) {
-            memoryUpdated = true;
-          }
+          if (updated) memoryUpdated = true;
         }
 
         if (memoryUpdated) {
@@ -749,30 +780,23 @@ function startBattlePolling(io, battle) {
             }
           };
 
-          console.log(`📢 Emitting update for battle ${currentBattle.battleCode}`);
-          console.log(`   Team A: ${stats.teamAScore} pts | Team B: ${stats.teamBScore} pts`);
-
           io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
             battle: updatedBattle,
             stats,
             newSolves: results,
           });
 
-          // Check if all problems solved
-          const allSolved = updatedBattle.problems.every(p => p.solvedBy !== null);
-          if (allSolved) {
-            console.log(`✅ All problems solved in battle ${battle.battleCode}`);
-            await handleBattleEnd(io, updatedBattle);
-            stopBattlePolling(battle.id);
+          if (!gracePeriodActive) {
+            const allSolved = updatedBattle.problems.every(p => p.solvedBy !== null);
+            if (allSolved) {
+              await handleBattleEnd(io, updatedBattle);
+              stopBattlePolling(battle.id);
+            }
           }
         }
       } else {
-        // Total-solves mode: Get fresh stats from database
         const stats = await teamBattleService.getBattleStats(currentBattle.id);
         const updatedBattle = await teamBattleService.getBattleWithDetails(currentBattle.id);
-
-        console.log(`📢 Emitting update for battle ${currentBattle.battleCode} (total-solves)`);
-        console.log(`   Team A: ${stats.teamAScore} pts | Team B: ${stats.teamBScore} pts`);
 
         io.to(`team-battle-${currentBattle.battleCode}`).emit('team-battle-update', {
           battle: updatedBattle,
@@ -780,18 +804,15 @@ function startBattlePolling(io, battle) {
           newSolves: results,
         });
 
-        // Update memory
         battleMemory.addBattle(updatedBattle);
       }
     } catch (error) {
-      console.error(`❌ Polling error for battle ${battle.id}:`, error.message);
-      console.error(error.stack);
+      console.error(`❌ Poll error:`, error.message);
     }
   }, pollInterval * 1000);
 
   activePolls.set(battle.id, intervalId);
 }
-
 /**
  * Stop polling for a battle
  */
