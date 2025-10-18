@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Trophy, Clock, Zap, Loader } from "lucide-react";
+import { Trophy, Clock, Zap, Loader, AlertTriangle } from "lucide-react";
 
 function getUserTeam(activeBattle, user) {
   const player = activeBattle.players.find(p => p.userId === user.id);
@@ -15,13 +15,25 @@ export default function BattleResult({
 }) {
   const [isLoading, setIsLoading] = useState(false);
 
+  // Extract team elimination data from activeBattle
+  const teamEliminated = activeBattle?.teamEliminated || false;
+  const eliminatedTeam = activeBattle?.eliminatedTeam || null;
+  const reason = activeBattle?.reason || null;
+
   const userTeam = getUserTeam(activeBattle, user);
   const isFirstSolve = activeBattle.winningStrategy === 'first-solve';
   
   let won = null;
   let tieBreaker = false;
   
-  if (battleStats.teamAScore > battleStats.teamBScore) {
+  // CRITICAL FIX: Check for team elimination FIRST before checking scores
+  if (teamEliminated && eliminatedTeam) {
+    // Team was eliminated - the other team wins
+    won = eliminatedTeam === 'A' ? 'B' : 'A';
+    console.log('🏆 Winner determined by team elimination:', won);
+    console.log('   Eliminated team:', eliminatedTeam);
+    console.log('   Winning team:', won);
+  } else if (battleStats.teamAScore > battleStats.teamBScore) {
     won = 'A';
   } else if (battleStats.teamBScore > battleStats.teamAScore) {
     won = 'B';
@@ -44,6 +56,13 @@ export default function BattleResult({
   
   const userWon = won === userTeam;
   const isDraw = won === null;
+
+  console.log('🎯 Battle Result Display:');
+  console.log('   User team:', userTeam);
+  console.log('   Winning team:', won);
+  console.log('   User won:', userWon);
+  console.log('   Is draw:', isDraw);
+  console.log('   Team eliminated:', teamEliminated);
 
   const handleBackToMenu = async () => {
     if (isLoading) return; // Prevent double clicks
@@ -78,12 +97,25 @@ export default function BattleResult({
                 <Trophy className="w-12 h-12 text-white" />
               </div>
               <h1 className="text-4xl font-bold text-green-400 mb-4">
-                {earlyCompletion ? '🎉 Flawless Victory!' : 'Victory!'}
+                {earlyCompletion ? '🎉 Flawless Victory!' : teamEliminated ? '🏆 Victory by Forfeit!' : 'Victory!'}
               </h1>
               <p className="text-gray-300 text-xl mb-4">
                 Your team won with {won === 'A' ? battleStats.teamAScore : battleStats.teamBScore} points!
               </p>
-              {earlyCompletion && (
+              {teamEliminated && eliminatedTeam && (
+                <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-3 mb-4">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <AlertTriangle className="w-5 h-5 text-yellow-300" />
+                    <p className="text-yellow-300 text-sm font-bold">
+                      Opponent team eliminated - all players left!
+                    </p>
+                  </div>
+                  {reason && (
+                    <p className="text-yellow-200 text-xs">{reason}</p>
+                  )}
+                </div>
+              )}
+              {earlyCompletion && !teamEliminated && (
                 <div className="bg-green-500/20 border border-green-500/50 rounded-lg p-3 mb-4">
                   <p className="text-green-300 text-sm font-bold">
                     ⚡ All problems completed before time expired!
@@ -106,11 +138,26 @@ export default function BattleResult({
               <div className="w-24 h-24 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Trophy className="w-12 h-12 text-white" />
               </div>
-              <h1 className="text-4xl font-bold text-red-400 mb-4">Defeat</h1>
+              <h1 className="text-4xl font-bold text-red-400 mb-4">
+                {teamEliminated ? 'Defeat by Forfeit' : 'Defeat'}
+              </h1>
               <p className="text-gray-300 text-xl mb-4">
                 Your team scored {won === 'A' ? battleStats.teamBScore : battleStats.teamAScore} points
               </p>
-              {earlyCompletion && (
+              {teamEliminated && (
+                <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-3 mb-4">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <AlertTriangle className="w-5 h-5 text-red-300" />
+                    <p className="text-red-300 text-sm font-bold">
+                      Your team was eliminated - all players left!
+                    </p>
+                  </div>
+                  {reason && (
+                    <p className="text-red-200 text-xs">{reason}</p>
+                  )}
+                </div>
+              )}
+              {earlyCompletion && !teamEliminated && (
                 <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-3 mb-4">
                   <p className="text-red-300 text-sm font-bold">
                     Opponent completed all problems first

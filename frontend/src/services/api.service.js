@@ -141,11 +141,21 @@ class ApiService {
     });
   }
 
-  async leaveTeamBattle(battleId) {
-    return this.call(`/team-battle/${battleId}/leave`, {
-      method: 'DELETE',
-    });
-  }
+async leaveTeamBattle(battleId) {
+  console.log('🌐 API: Calling leave team battle endpoint:', battleId);
+  
+  const response = await this.call(`/team-battle/${battleId}/leave`, {
+    method: 'DELETE',
+  });
+  
+  console.log('🌐 API: Raw response received:', response);
+  console.log('🌐 API: Response type:', typeof response);
+  console.log('🌐 API: Response keys:', Object.keys(response));
+  console.log('🌐 API: teamEliminated value:', response.teamEliminated);
+  console.log('🌐 API: teamEliminated type:', typeof response.teamEliminated);
+  
+  return response;
+}
 
   async getTeamBattle(battleCode) {
     return this.call(`/team-battle/${battleCode}`);

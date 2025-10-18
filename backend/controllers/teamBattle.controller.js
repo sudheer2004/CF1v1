@@ -1,6 +1,7 @@
 const teamBattleService = require('../services/teamBattle.service');
 const userService = require('../services/user.service');
 const battleMemory = require('../socket/teamBattleMemory');
+const prisma = require('../config/database.config');
 
 /**
  * Create a new team battle room
@@ -315,115 +316,197 @@ exports.getActiveTeamBattle = async (req, res) => {
 };
 
 /**
- * Leave team battle
+ * Leave team battle - FINAL FIX
  */
 exports.leaveTeamBattle = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
 
-    console.log('🚪 LEAVE REQUEST:', { battleId: id, userId });
+    console.log('═══════════════════════════════════════');
+    console.log('🚪 CONTROLLER: LEAVE TEAM BATTLE REQUEST');
+    console.log('═══════════════════════════════════════');
+    console.log('   Battle ID:', id);
+    console.log('   User ID:', userId);
 
-    const prisma = require('../config/database.config');
-    
-    const battle = await prisma.teamBattle.findUnique({
+    // Get battle info BEFORE leaving
+    const battleBefore = await prisma.teamBattle.findUnique({
       where: { id },
-      include: {
+      include: { 
         players: true,
-      },
+        problems: true 
+      }
     });
 
-    if (!battle) {
+    if (!battleBefore) {
+      console.log('❌ Battle not found');
       return res.status(404).json({ 
         success: false, 
         message: 'Battle not found' 
       });
     }
 
-    if (battle.status !== 'waiting') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Cannot leave battle after it has started' 
+    const battleCode = battleBefore.battleCode;
+    const io = req.app.get('io');
+
+    console.log('📋 Battle Info:');
+    console.log('   Code:', battleCode);
+    console.log('   Status:', battleBefore.status);
+    console.log('   Players:', battleBefore.players.length);
+
+    // CRITICAL: Check if battle is already completed
+    if (battleBefore.status === 'completed') {
+      console.log('⚠️ Battle already completed - allowing graceful leave');
+      
+      // Just send success response, don't try to process leave
+      return res.json({
+        success: true,
+        message: 'Battle already ended',
+        deleted: false,
+        teamEliminated: false,
+        alreadyCompleted: true,
       });
     }
 
-    const io = req.app.get('io');
+    // Check if user is still in the battle
+    const playerExists = battleBefore.players.find(p => 
+      p.userId === userId || String(p.userId) === String(userId)
+    );
 
-    // If creator leaves, delete the entire battle
-    if (battle.creatorId === userId) {
-      console.log('🗑️ Creator leaving, deleting battle');
-
-      await prisma.teamBattle.delete({
-        where: { id },
+    if (!playerExists) {
+      console.log('⚠️ Player not in battle - already left');
+      
+      return res.json({
+        success: true,
+        message: 'Already left battle',
+        deleted: false,
+        teamEliminated: false,
+        alreadyLeft: true,
       });
+    }
 
-      battleMemory.removeBattle(id);
+    // Process the leave via service
+    console.log('🔄 Calling teamBattleService.leaveBattle...');
+    const result = await teamBattleService.leaveBattle(id, userId);
 
-      if (io) {
-        io.to(`team-battle-${battle.battleCode}`).emit('battle-deleted', {
+    console.log('✅ SERVICE RETURNED:');
+    console.log('   deleted:', result.deleted);
+    console.log('   teamEliminated:', result.teamEliminated);
+    console.log('   battleEnded:', result.battleEnded);
+    console.log('   winningTeam:', result.winningTeam);
+    console.log('   eliminatedTeam:', result.eliminatedTeam);
+
+    // CASE 1: Battle was deleted (creator left waiting room with only themselves)
+    if (result.deleted) {
+      console.log('🗑️ CASE 1: BATTLE DELETED');
+      
+      if (battleCode && io) {
+        io.to(`team-battle-${battleCode}`).emit('battle-deleted', {
           message: 'Room creator has closed the battle',
         });
-        
-        console.log('📢 Broadcast battle-deleted to room:', battle.battleCode);
       }
 
-      return res.json({
+      const response = {
         success: true,
         message: 'Battle deleted',
         deleted: true,
-      });
+        teamEliminated: false,
+      };
+      
+      console.log('📤 SENDING RESPONSE:', JSON.stringify(response));
+      console.log('═══════════════════════════════════════\n');
+      return res.json(response);
     }
 
-    // Regular player leaving
-    console.log('👤 Regular player leaving...');
+    // CASE 2: Team eliminated - battle ended
+    if (result.teamEliminated === true && result.battleEnded === true) {
+      console.log('🏆 CASE 2: TEAM ELIMINATION DETECTED!');
+      console.log('   Winning Team:', result.winningTeam);
+      console.log('   Eliminated Team:', result.eliminatedTeam);
 
-    await prisma.teamBattlePlayer.deleteMany({
-      where: {
-        battleId: id,
-        userId,
-      },
-    });
-
-    console.log('✅ Player removed from database');
-
-    // Fetch updated battle state
-    const updatedBattle = await prisma.teamBattle.findUnique({
-      where: { id },
-      include: {
-        players: {
-          orderBy: [{ team: 'asc' }, { position: 'asc' }],
-        },
-        problems: {
-          orderBy: { problemIndex: 'asc' },
-        },
-      },
-    });
-
-    if (updatedBattle) {
-      // Update memory
-      battleMemory.addBattle(updatedBattle);
-      console.log('✅ Memory updated with fresh battle data');
-      console.log('   Remaining players:', updatedBattle.players.length);
-
-      // ✅ Broadcast update to remaining players
-      if (io) {
-        io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', {
-          battle: updatedBattle,
-        });
-        console.log('📢 Broadcasted player leave to remaining players in room:', battle.battleCode);
-      } else {
-        console.warn('⚠️ IO not available, remaining players won\'t see the update immediately');
+      // Stop polling - FIXED: Load module dynamically to avoid circular dependency
+      try {
+        const { stopBattlePolling } = require('../socket/teamBattleSocket');
+        stopBattlePolling(id);
+        console.log('   ✅ Polling stopped');
+      } catch (err) {
+        console.log('   ⚠️ Could not stop polling (module not loaded):', err.message);
       }
+
+      // Get final battle state
+      const finalBattle = await teamBattleService.getBattleWithDetails(id);
+      const finalStats = await teamBattleService.getBattleStats(id);
+      console.log('   ✅ Final battle state fetched');
+
+      // Emit socket event to ALL players
+      if (battleCode && io) {
+        console.log('   📢 Emitting team-battle-ended to room:', battleCode);
+        
+        io.to(`team-battle-${battleCode}`).emit('team-battle-ended', {
+          battle: finalBattle,
+          stats: finalStats,
+          winningTeam: result.winningTeam,
+          isDraw: false,
+          teamEliminated: true,
+          eliminatedTeam: result.eliminatedTeam,
+          reason: `Team ${result.eliminatedTeam} forfeited - all players left`,
+        });
+        
+        console.log('   ✅ Socket event emitted');
+      }
+
+      // Wait for socket event to be received
+      console.log('   ⏳ Waiting 500ms for socket delivery...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Build response object
+      const response = {
+        success: true,
+        message: 'Team eliminated - battle ended',
+        deleted: false,
+        teamEliminated: true,
+        winningTeam: result.winningTeam,
+        eliminatedTeam: result.eliminatedTeam,
+      };
+      
+      console.log('📤 SENDING RESPONSE WITH TEAM ELIMINATION:');
+      console.log(JSON.stringify(response, null, 2));
+      console.log('═══════════════════════════════════════\n');
+      
+      return res.json(response);
     }
 
-    res.json({
+    // CASE 3: Normal leave - battle continues
+    console.log('✅ CASE 3: NORMAL LEAVE (battle continues)');
+    
+    const updatedBattle = await teamBattleService.getBattleWithDetails(id);
+    
+    if (updatedBattle && io) {
+      battleMemory.addBattle(updatedBattle);
+      io.to(`team-battle-${battleCode}`).emit('team-battle-updated', {
+        battle: updatedBattle,
+      });
+      console.log('   ✅ Updated battle broadcasted');
+    }
+
+    const response = {
       success: true,
       message: 'Left battle successfully',
       deleted: false,
-    });
+      teamEliminated: false,
+    };
+    
+    console.log('📤 SENDING NORMAL LEAVE RESPONSE:');
+    console.log(JSON.stringify(response, null, 2));
+    console.log('═══════════════════════════════════════\n');
+
+    return res.json(response);
+
   } catch (error) {
-    console.error('❌ Leave team battle error:', error);
-    res.status(500).json({ 
+    console.error('❌ CONTROLLER ERROR:', error);
+    console.log('═══════════════════════════════════════\n');
+    
+    return res.status(500).json({ 
       success: false, 
       message: error.message || 'Failed to leave team battle' 
     });

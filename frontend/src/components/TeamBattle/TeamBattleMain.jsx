@@ -116,6 +116,7 @@ export default function TeamBattleMain({
     setIsPreparing,
     setError,
     isLeaving,
+    setIsLeaving,
     user,
     cleanupBattleState,
     setEarlyCompletion,
@@ -147,40 +148,43 @@ export default function TeamBattleMain({
   };
 
   const handleJoinRoom = async () => {
-    if (!roomCode.trim()) {
-      setError("Please enter a room code");
-      return;
-    }
+  if (!roomCode.trim()) {
+    setError("Please enter a room code");
+    return;
+  }
 
-    if (!socketReady) {
-      setError("Not connected to server. Please wait...");
-      return;
-    }
+  if (!socketReady) {
+    setError("Not connected to server. Please wait...");
+    return;
+  }
 
-    setIsJoining(true);
-    setError("");
+  setIsJoining(true);
+  setError("");
 
-    try {
-      console.log("🔌 Joining socket room:", roomCode);
+  try {
+    console.log("🔌 Joining socket room:", roomCode);
+    
+    // ✅ FIXED: Call API first, then join socket room
+    // The API validates the room exists before we join
+    const response = await api.joinTeamBattle(roomCode);
+
+    if (response.success) {
+      console.log("✅ Joined battle successfully:", response.battle);
+      
+      // Now join the socket room
       socket.emit("join-team-battle-room", { battleCode: roomCode });
-
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      const response = await api.joinTeamBattle(roomCode);
-
-      if (response.success) {
-        console.log("✅ Joined battle successfully:", response.battle);
-        setActiveBattle(response.battle);
-        setIsCreator(false);
-        setIsJoining(false);
-        setMode("waiting");
-      }
-    } catch (err) {
-      console.error("❌ Join room error:", err);
-      setError(err.message || "Failed to join battle");
+      
+      setActiveBattle(response.battle);
+      setIsCreator(false);
       setIsJoining(false);
+      setMode("waiting");
     }
-  };
+  } catch (err) {
+    console.error("❌ Join room error:", err);
+    setError(err.message || "Failed to join battle");
+    setIsJoining(false);
+  }
+};
 
   const handleCopyRoomId = () => {
     if (activeBattle) {
@@ -255,35 +259,76 @@ export default function TeamBattleMain({
     socket.emit("start-team-battle", { battleId: activeBattle.id });
   };
 
-  const handleLeaveBattle = async () => {
-    if (!activeBattle || isLeaving) return;
+const handleLeaveBattle = async () => {
+  console.log("🚪 handleLeaveBattle called");
+  
+  if (!activeBattle || isLeaving) {
+    console.log("⚠️ Blocked: No active battle or already leaving");
+    return;
+  }
 
-    console.log("🚪 Leaving battle:", activeBattle.battleCode);
+  console.log("🚪 Leaving battle:", activeBattle.battleCode);
 
-    setIsLeaving(true);
-    setError("");
+  setIsLeaving(true);
+  setError("");
 
-    try {
-      await api.leaveTeamBattle(activeBattle.id);
+  try {
+    // Store battle info before API call
+    const battleId = activeBattle.id;
+    const battleCode = activeBattle.battleCode;
+    const battleStatus = activeBattle.status;
 
-      console.log("✅ API call successful, cleaning up local state");
+    console.log("📞 Calling leave API for battle:", battleId);
+    
+    // ONLY call API - do NOT emit socket leave event yet!
+    const response = await api.leaveTeamBattle(battleId);
 
-      if (socket && socketReady) {
-        socket.emit("leave-team-battle-room", {
-          battleCode: activeBattle.battleCode,
-          battleId: activeBattle.id,
-        });
-      }
+    console.log("✅ API response received:", JSON.stringify(response, null, 2));
+    console.log("📊 Checking response.teamEliminated:", response.teamEliminated);
 
+    // Check if battle was deleted
+    if (response.deleted) {
+      console.log("🗑️ Battle was deleted");
       cleanupBattleState();
-
-      console.log("✅ Successfully left battle");
-    } catch (err) {
-      console.error("❌ Error leaving battle:", err);
-      setError(err.message || "Failed to leave battle");
-      setIsLeaving(false);
+      return;
     }
-  };
+
+    // CRITICAL: Check for team elimination
+    if (response.teamEliminated === true) {
+      console.log("🏆🏆🏆 TEAM ELIMINATION CONFIRMED! 🏆🏆🏆");
+      console.log("   ⏳ Waiting for socket event: team-battle-ended");
+      console.log("   ⚠️ DO NOT cleanup state");
+      console.log("   ⚠️ DO NOT leave socket room");
+      console.log("   ⚠️ Socket handler will switch to result mode");
+      
+      // Stay in current mode, keep socket connected
+      // The team-battle-ended event will arrive soon and switch to result mode
+      // isLeaving stays true to show "Leaving..." state
+      return;
+    }
+
+    // Normal leave - battle continues with other players
+    console.log("✅ Normal leave - cleaning up and leaving socket room");
+    
+    // Now it's safe to leave the socket room
+    if (socket && socketReady) {
+      console.log("🔌 Emitting leave-team-battle-room");
+      socket.emit("leave-team-battle-room", {
+        battleCode: battleCode,
+        battleId: battleId,
+      });
+    }
+
+    // Cleanup state
+    cleanupBattleState();
+    console.log("✅ Successfully left battle");
+
+  } catch (err) {
+    console.error("❌ Error leaving battle:", err);
+    setError(err.message || "Failed to leave battle");
+    setIsLeaving(false);
+  }
+};
 
   const handleRemovePlayer = (playerId) => {
     if (!isCreator || !activeBattle) return;
@@ -306,7 +351,7 @@ export default function TeamBattleMain({
   };
 
   // ===== RENDER MODES =====
-
+  
   if (mode === "menu") {
     return (
       <TeamBattleMenu

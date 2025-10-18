@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const teamBattleController = require('../controllers/teamBattle.controller');
-const teamBattleService = require('../services/teamBattle.service'); // ← ADD THIS LINE
 const authMiddleware = require('../middlewares/auth.middleware');
 
 // All routes require authentication
@@ -34,32 +33,19 @@ router.get('/:code', teamBattleController.getTeamBattle);
  * @access  Private
  */
 router.post('/:code/join', teamBattleController.joinTeamBattle);
-router.get('/:battleId/stats', teamBattleController.getTeamBattleStats);
+
 /**
- * @route   DELETE /api/team-battle/:battleId/leave
- * @desc    Leave a team battle (only in waiting status)
+ * @route   GET /api/team-battle/:battleId/stats
+ * @desc    Get team battle statistics
  * @access  Private
  */
-router.delete('/:battleId/leave', async (req, res, next) => {
-  try {
-    const { battleId } = req.params;
-    const userId = req.user.id;
+router.get('/:battleId/stats', teamBattleController.getTeamBattleStats);
 
-    console.log('🔍 Leave battle request:');
-    console.log('  battleId:', battleId, typeof battleId);
-    console.log('  userId:', userId, typeof userId);
-
-    const result = await teamBattleService.leaveBattle(battleId, userId);
-
-    res.json({
-      success: true,
-      message: result.deleted ? 'Battle deleted' : 'Left battle successfully',
-      deleted: result.deleted,
-    });
-  } catch (error) {
-    console.error('❌ Leave battle error:', error);
-    next(error);
-  }
-});
+/**
+ * @route   DELETE /api/team-battle/:id/leave
+ * @desc    Leave a team battle
+ * @access  Private
+ */
+router.delete('/:id/leave', teamBattleController.leaveTeamBattle);
 
 module.exports = router;

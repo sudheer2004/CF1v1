@@ -11,6 +11,7 @@ export const useTeamBattleSocket = ({
   setIsPreparing,
   setError,
   isLeaving,
+  setIsLeaving,
   user,
   cleanupBattleState,
   setEarlyCompletion,
@@ -75,6 +76,8 @@ export const useTeamBattleSocket = ({
     (data) => {
       console.log("🔄 Battle updated received:", data.battle);
       console.log("  - Players count:", data.battle?.players?.length);
+      console.log("  - Current activeBattle:", activeBattle ? "exists" : "null");
+      console.log("  - isLeaving flag:", isLeaving);
 
       if (!activeBattle) {
         console.log(
@@ -169,31 +172,92 @@ export const useTeamBattleSocket = ({
     [setActiveBattle, setBattleStats]
   );
 
-  const handleBattleEnded = useCallback(
-    (data) => {
-      console.log("🏁 Battle ended:", data);
-      
-      if (data.battle) {
-        setActiveBattle(data.battle);
-      }
-      
-      if (data.stats) {
-        setBattleStats(data.stats);
-      }
-      
-      // NEW: Track if it was early completion
-      if (data.earlyCompletion) {
-        console.log("⚡ Early completion detected!");
-        setEarlyCompletion(true);
-      } else {
-        setEarlyCompletion(false);
-      }
-      
-      setMode("result");
-      setIsPreparing(false);
-    },
-    [setActiveBattle, setBattleStats, setMode, setIsPreparing, setEarlyCompletion]
-  );
+// In useTeamBattleSocket.js - Updated handleBattleEnded
+
+// In useTeamBattleSocket.js - Updated handleBattleEnded
+
+const handleBattleEnded = useCallback(
+  (data) => {
+    console.log("🏁 ================================");
+    console.log("🏁 BATTLE ENDED EVENT RECEIVED");
+    console.log("🏁 ================================");
+    console.log("   Full data:", JSON.stringify(data, null, 2));
+    console.log("   Current activeBattle:", activeBattle ? "exists" : "null");
+    console.log("   Current isLeaving:", isLeaving);
+    console.log("   Team Eliminated:", data.teamEliminated);
+    console.log("   Eliminated Team:", data.eliminatedTeam);
+    console.log("   Winning Team:", data.winningTeam);
+    console.log("   Reason:", data.reason);
+    console.log("🏁 ================================");
+    
+    // CRITICAL: Use data.battle from the event, NOT activeBattle
+    // This ensures we get the battle data even if activeBattle was cleared
+    if (!data.battle) {
+      console.error("❌ No battle data in team-battle-ended event!");
+      return;
+    }
+
+    // Create updated battle object with team elimination data
+    const updatedBattle = {
+      ...data.battle,
+      teamEliminated: data.teamEliminated || false,
+      eliminatedTeam: data.eliminatedTeam || null,
+      reason: data.reason || null,
+      winningTeam: data.winningTeam || null,
+    };
+
+    console.log("📦 Setting battle with elimination data:", {
+      battleId: updatedBattle.id,
+      teamEliminated: updatedBattle.teamEliminated,
+      eliminatedTeam: updatedBattle.eliminatedTeam,
+      winningTeam: updatedBattle.winningTeam,
+      reason: updatedBattle.reason
+    });
+
+    // ALWAYS set the battle, even if activeBattle was null
+    setActiveBattle(updatedBattle);
+
+    if (data.stats) {
+      setBattleStats(data.stats);
+    }
+
+    // Track if it was early completion
+    if (data.earlyCompletion) {
+      console.log("⚡ Early completion detected!");
+      setEarlyCompletion(true);
+    } else {
+      setEarlyCompletion(false);
+    }
+    
+    // Track team elimination
+    if (data.teamEliminated) {
+      console.log(`⚠️ Team elimination detected!`);
+      console.log(`   Eliminated Team: ${data.eliminatedTeam}`);
+      console.log(`   Winning Team: ${data.winningTeam}`);
+      console.log(`   Reason: ${data.reason}`);
+    }
+    
+    console.log("🎯 Switching to RESULT mode...");
+    setMode("result");
+    setIsPreparing(false);
+    setIsLeaving(false); // CRITICAL: Reset leaving flag so result screen can render
+    console.log("✅ Mode switched to result");
+
+    // IMPORTANT: Now leave the socket room after processing the event
+    // Use the socket from the hook's context
+    if (socket && socketReady && updatedBattle.battleCode) {
+      setTimeout(() => {
+        console.log("🚪 Now leaving socket room after battle ended");
+        socket.emit("leave-team-battle-room", {
+          battleCode: updatedBattle.battleCode,
+          battleId: updatedBattle.id,
+        });
+      }, 1000); // Give 1 second for UI to settle
+    }
+  },
+  [socket, socketReady, setActiveBattle, setBattleStats, setMode, setIsPreparing, setEarlyCompletion, setIsLeaving]
+  // NOTE: Added socket and socketReady to dependencies
+);
 
   const handleRemovedFromBattle = useCallback(
     (data) => {

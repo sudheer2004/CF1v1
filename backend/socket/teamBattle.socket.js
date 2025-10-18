@@ -83,88 +83,99 @@ socket.on('create-team-battle', async (data) => {
   }
 });
 
-  /**
-   * Join team battle room - FIXED FOR INSTANT UPDATES
-   */
-  socket.on('join-team-battle-room', async (data) => {
-    try {
-      if (!socket.userId) {
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
-      }
+/**
+ * OPTIMIZED: Join team battle room
+ * This should ONLY be called AFTER the HTTP API has added the user to the battle
+ */
+socket.on('join-team-battle-room', async (data) => {
+  try {
+    if (!socket.userId) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
 
-      const { battleCode } = data;
+    const { battleCode } = data;
 
-      console.log(`🔍 Join room request - User: ${socket.userId}, Room: ${battleCode}`);
+    console.log(`🔍 Join room request - User: ${socket.userId}, Room: ${battleCode}`);
 
-      // Try memory first, fallback to database
-      let battle = battleMemory.getBattleByCode(battleCode);
+    // Try memory first, fallback to database
+    let battle = battleMemory.getBattleByCode(battleCode);
+    
+    if (!battle) {
+      console.log(`📥 Battle not in memory, fetching from database...`);
+      battle = await teamBattleService.getBattleByCode(battleCode);
       
       if (!battle) {
-        console.log(`📥 Battle not in memory, fetching from database...`);
-        battle = await teamBattleService.getBattleByCode(battleCode);
-        
-        if (!battle) {
-          console.log(`❌ Battle not found: ${battleCode}`);
-          socket.emit('error', { message: 'Battle not found' });
-          return;
-        }
-
-        // Add to memory for future fast access
-        battleMemory.addBattle(battle);
+        console.log(`❌ Battle not found: ${battleCode}`);
+        socket.emit('error', { message: 'Battle not found' });
+        return;
       }
 
-      console.log(`✅ Battle found: ${battle.id}, Players: ${battle.players.length}`);
-
-      // Join socket rooms
-      socket.join(`team-battle-${battleCode}`);
-      socket.join(`team-battle-${battle.id}`);
-
-      console.log(`✅ User ${socket.userId} joined team battle room: ${battleCode}`);
-
-      // ✅ Send current state to THIS socket
-      socket.emit('team-battle-state', { battle });
-      
-      // ✅ Broadcast to ALL users in the room (so everyone sees the update)
-      io.to(`team-battle-${battleCode}`).emit('team-battle-updated', { battle });
-      
-      console.log(`📢 Broadcasted updated battle state to room ${battleCode}`);
-    } catch (error) {
-      console.error('Join team battle room error:', error);
-      socket.emit('error', { message: error.message });
+      // Add to memory for future fast access
+      battleMemory.addBattle(battle);
     }
-  });
+
+    console.log(`✅ Battle found: ${battle.id}, Players: ${battle.players.length}`);
+
+    // Join socket rooms FIRST
+    socket.join(`team-battle-${battleCode}`);
+    socket.join(`team-battle-${battle.id}`);
+
+    console.log(`✅ User ${socket.userId} joined socket rooms`);
+
+    // ✅ INSTANT broadcast to ALL users (including the joiner)
+    io.to(`team-battle-${battleCode}`).emit('team-battle-updated', { battle });
+    
+    console.log(`📢 Broadcasted updated battle state to room ${battleCode}`);
+  } catch (error) {
+    console.error('Join team battle room error:', error);
+    socket.emit('error', { message: error.message });
+  }
+});
 
   /**
-   * Leave team battle room
-   */
-  socket.on('leave-team-battle-room', async (data) => {
-    try {
-      if (!socket.userId) {
-        return;
-      }
-
-      const { battleCode, battleId } = data;
-
-      if (!battleCode && !battleId) {
-        console.warn('Leave team battle room: Missing battleCode and battleId');
-        return;
-      }
-
-      // Leave socket rooms
-      if (battleCode) {
-        socket.leave(`team-battle-${battleCode}`);
-        console.log(`✅ User ${socket.userId} left team battle room: ${battleCode}`);
-      }
-      
-      if (battleId) {
-        socket.leave(`team-battle-${battleId}`);
-        console.log(`✅ User ${socket.userId} left team battle room ID: ${battleId}`);
-      }
-    } catch (error) {
-      console.error('Leave team battle room error:', error);
+ * Leave team battle room - FIXED to not interfere with HTTP API
+ * This should ONLY be called for socket cleanup, NOT during active leave operations
+ */
+socket.on('leave-team-battle-room', async (data) => {
+  try {
+    if (!socket.userId) {
+      return;
     }
-  });
+
+    const { battleCode, battleId } = data;
+
+    if (!battleCode && !battleId) {
+      console.warn('Leave team battle room: Missing battleCode and battleId');
+      return;
+    }
+
+    console.log('🔌 Socket leave-team-battle-room event:', {
+      userId: socket.userId,
+      battleCode,
+      battleId,
+      source: 'socket-event'
+    });
+
+    // Just leave the socket rooms - don't do any database operations
+    // The HTTP API endpoint handles all the business logic
+    if (battleCode) {
+      socket.leave(`team-battle-${battleCode}`);
+      console.log(`✅ User ${socket.userId} left socket room: ${battleCode}`);
+    }
+    
+    if (battleId) {
+      socket.leave(`team-battle-${battleId}`);
+      console.log(`✅ User ${socket.userId} left socket room ID: ${battleId}`);
+    }
+
+    // NOTE: We do NOT call the service or update the database here
+    // That's handled by the HTTP API endpoint: POST /team-battle/:id/leave
+
+  } catch (error) {
+    console.error('Leave team battle room error:', error);
+  }
+});
 
   /**
    * Move player to different slot - OPTIMIZED FOR INSTANT UPDATES
@@ -251,10 +262,10 @@ socket.on('create-team-battle', async (data) => {
     }
   });
 
-  /**
-   * Remove player from battle - FIXED
-   */
-  socket.on('remove-team-player', async (data) => {
+ /**
+ * Remove player from battle - FIXED to emit before removing from room
+ */
+socket.on('remove-team-player', async (data) => {
   try {
     if (!socket.userId) {
       socket.emit('error', { message: 'Not authenticated' });
@@ -286,40 +297,103 @@ socket.on('create-team-battle', async (data) => {
 
     console.log('✅ User authorized to remove player');
 
-    // Find all sockets in the room
-    const allSockets = await io.in(`team-battle-${battle.battleCode}`).fetchSockets();
-    console.log(`🔍 Found ${allSockets.length} sockets in room`);
+    // Call service to remove player (handles team elimination)
+    const result = await teamBattleService.removePlayer(battleId, socket.userId, targetUserId);
 
-    // Notify the removed player first and remove from rooms
-    for (const clientSocket of allSockets) {
-      if (clientSocket.userId === targetUserId) {
-        console.log(`✅ Found removed player's socket, notifying them`);
+    // Check if team was eliminated
+    if (result.teamEliminated && result.battleEnded) {
+      console.log(`⚠️ TEAM ELIMINATION! Team ${result.eliminatedTeam} has no players left`);
+      console.log(`🏆 Team ${result.winningTeam} wins by forfeit`);
 
-        clientSocket.emit('removed-from-battle', {
-          battleId,
-          battleCode: battle.battleCode,
-          message: 'You have been removed from the battle',
-        });
+      // Stop polling immediately
+      const { stopBattlePolling } = require('./teamBattleSocket');
+      stopBattlePolling(battleId);
 
-        clientSocket.leave(`team-battle-${battle.battleCode}`);
-        clientSocket.leave(`team-battle-${battle.id}`);
+      // Get final stats
+      const finalStats = await teamBattleService.getBattleStats(battleId);
 
-        console.log(`🚪 Removed user ${targetUserId} from battle rooms`);
-        break;
+      // Update memory
+      battleMemory.updateBattleStatus(battleId, 'completed', {
+        winningTeam: result.winningTeam
+      });
+
+      console.log('📢 Broadcasting team-battle-ended to room:', battle.battleCode);
+
+      // CRITICAL: Emit BEFORE removing player from room
+      io.to(`team-battle-${battle.battleCode}`).emit('team-battle-ended', {
+        battle: result.battle,
+        stats: finalStats,
+        winningTeam: result.winningTeam,
+        isDraw: false,
+        teamEliminated: true,
+        eliminatedTeam: result.eliminatedTeam,
+        reason: `Team ${result.eliminatedTeam} forfeited - ${result.removedPlayer.username} was removed and team is empty`,
+      });
+
+      console.log('✅ team-battle-ended emitted to all players');
+
+      // Small delay to ensure event is received
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // NOW find and notify the removed player
+      const allSockets = await io.in(`team-battle-${battle.battleCode}`).fetchSockets();
+      console.log(`🔍 Found ${allSockets.length} sockets in room`);
+
+      for (const clientSocket of allSockets) {
+        if (clientSocket.userId === targetUserId) {
+          console.log(`✅ Found removed player's socket, notifying them`);
+
+          clientSocket.emit('removed-from-battle', {
+            battleId,
+            battleCode: battle.battleCode,
+            message: 'You have been removed from the battle',
+          });
+
+          clientSocket.leave(`team-battle-${battle.battleCode}`);
+          clientSocket.leave(`team-battle-${battle.id}`);
+
+          console.log(`🚪 Removed user ${targetUserId} from battle rooms`);
+          break;
+        }
       }
+
+      console.log(`✅ Battle ended due to team elimination after player removal`);
+
+    } else {
+      // Normal removal, battle continues
+      console.log('📢 Broadcasting updated battle to remaining players');
+
+      // Notify removed player FIRST
+      const allSockets = await io.in(`team-battle-${battle.battleCode}`).fetchSockets();
+      
+      for (const clientSocket of allSockets) {
+        if (clientSocket.userId === targetUserId) {
+          console.log(`✅ Found removed player's socket, notifying them`);
+
+          clientSocket.emit('removed-from-battle', {
+            battleId,
+            battleCode: battle.battleCode,
+            message: 'You have been removed from the battle',
+          });
+
+          clientSocket.leave(`team-battle-${battle.battleCode}`);
+          clientSocket.leave(`team-battle-${battle.id}`);
+
+          console.log(`🚪 Removed user ${targetUserId} from battle rooms`);
+          break;
+        }
+      }
+
+      // Update memory
+      if (result.battle) {
+        battleMemory.addBattle(result.battle);
+      }
+
+      // Broadcast update to remaining players
+      io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', { 
+        battle: result.battle 
+      });
     }
-
-    // Update memory AFTER removed player is notified
-    const updatedBattle = battleMemory.removePlayer(battleId, targetUserId);
-
-    console.log('📢 Broadcasting updated battle to remaining players');
-    io.to(`team-battle-${battle.battleCode}`).emit('team-battle-updated', { 
-      battle: updatedBattle 
-    });
-
-    // Update database asynchronously
-    teamBattleService.removePlayer(battleId, socket.userId, targetUserId)
-      .catch(err => console.error('❌ Database remove failed:', err));
 
   } catch (error) {
     console.error('Remove team player error:', error);
@@ -466,26 +540,52 @@ socket.on('create-team-battle', async (data) => {
 
 /**
  * Select problems from Codeforces based on battle configuration
+ * FIXED: Fetches actual problem names for custom links using cached CF service
  */
 async function selectProblemsForBattle(battle) {
   const problems = battle.problems;
   const selectedProblems = [];
 
+  // Get all problems from cache (1 API call total, or 0 if cached)
+  const allCFProblems = await codeforcesService.fetchAllProblems();
+
   for (const problemConfig of problems) {
     if (problemConfig.useCustomLink) {
-      // Custom link - parse if it's a Codeforces link, otherwise skip selection
+      // Custom link - parse if it's a Codeforces link
       const cfMatch = problemConfig.customLink.match(/codeforces\.com\/(?:contest|problemset\/problem)\/(\d+)\/([A-Z]\d?)/i);
       
       if (cfMatch) {
-        selectedProblems.push({
-          problemIndex: problemConfig.problemIndex,
-          contestId: parseInt(cfMatch[1]),
-          index: cfMatch[2].toUpperCase(),
-          name: 'Custom Problem',
-          rating: null,
-        });
+        const contestId = parseInt(cfMatch[1]);
+        const problemIndex = cfMatch[2].toUpperCase();
+        
+        // ✅ FIXED: Find problem in cached list (no additional API call!)
+        const problemData = allCFProblems.find(
+          p => p.contestId === contestId && p.index === problemIndex
+        );
+        
+        if (problemData) {
+          console.log(`✅ Found problem in cache: ${problemData.name} (Rating: ${problemData.rating || 'N/A'})`);
+          
+          selectedProblems.push({
+            problemIndex: problemConfig.problemIndex,
+            contestId: contestId,
+            index: problemIndex,
+            name: problemData.name, // ✅ Actual problem name from cache
+            rating: problemData.rating || null,
+          });
+        } else {
+          // Fallback if problem not found in cache (rare)
+          console.warn(`⚠️ Problem ${contestId}${problemIndex} not found in cache, using fallback`);
+          selectedProblems.push({
+            problemIndex: problemConfig.problemIndex,
+            contestId: contestId,
+            index: problemIndex,
+            name: `Problem ${contestId}${problemIndex}`, // Better fallback
+            rating: null,
+          });
+        }
       } else {
-        // External link, store as-is
+        // External non-CF link, store as-is
         selectedProblems.push({
           problemIndex: problemConfig.problemIndex,
           contestId: null,

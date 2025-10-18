@@ -1,29 +1,27 @@
 const prisma = require('../config/database.config');
 const { generateRoomCode } = require('../utils/helpers.util');
+const battleMemory = require('../socket/teamBattleMemory'); // ← CRITICAL: ADD THIS IMPORT
 
 class TeamBattleService {
   /**
    * Create a new team battle room
    */
   async createBattle(creatorId, creatorData, settings) {
-    const { duration, numProblems, problems, winningStrategy } = settings; // UPDATED: added winningStrategy
+    const { duration, numProblems, problems, winningStrategy } = settings;
 
-    // Generate unique battle code
     const battleCode = await this.generateUniqueBattleCode();
 
-    // Create battle
     const battle = await prisma.teamBattle.create({
       data: {
         battleCode,
         creatorId,
         duration,
         numProblems,
-        winningStrategy: winningStrategy || 'first-solve', // UPDATED: add winning strategy
+        winningStrategy: winningStrategy || 'first-solve',
         status: 'waiting',
       },
     });
 
-    // Create problem configurations
     const problemData = problems.map((prob, index) => ({
       battleId: battle.id,
       problemIndex: index,
@@ -41,7 +39,6 @@ class TeamBattleService {
       data: problemData,
     });
 
-    // Add creator as first player in Team A
     await prisma.teamBattlePlayer.create({
       data: {
         battleId: battle.id,
@@ -75,23 +72,19 @@ class TeamBattleService {
       throw new Error('Battle has already started');
     }
 
-    // Check if user already in battle
     const existingPlayer = battle.players.find(p => p.userId === userId);
     if (existingPlayer) {
       throw new Error('You are already in this battle');
     }
 
-    // Check if battle is full (8 players max)
     if (battle.players.length >= 8) {
       throw new Error('Battle is full');
     }
 
-    // Auto-assign to team with fewer players
     const teamACounts = battle.players.filter(p => p.team === 'A').length;
     const teamBCounts = battle.players.filter(p => p.team === 'B').length;
     const assignedTeam = teamACounts <= teamBCounts ? 'A' : 'B';
 
-    // Find next available position in team
     const teamPlayers = battle.players.filter(p => p.team === assignedTeam);
     const usedPositions = teamPlayers.map(p => p.position);
     let position = 0;
@@ -127,7 +120,6 @@ class TeamBattleService {
       throw new Error('Cannot move player');
     }
 
-    // Check if target slot is empty
     const targetSlot = battle.players.find(
       p => p.team === newTeam && p.position === newPosition
     );
@@ -136,7 +128,6 @@ class TeamBattleService {
       throw new Error('Slot is already occupied');
     }
 
-    // Update player position
     await prisma.teamBattlePlayer.updateMany({
       where: {
         battleId,
@@ -152,9 +143,9 @@ class TeamBattleService {
   }
 
   /**
-   * Remove player from battle
+   * Remove player from battle (updated with team elimination)
    */
-  async removePlayer(battleId, creatorId, targetUserId) {
+  async removePlayer(battleId, requesterId, targetUserId) {
     const battle = await prisma.teamBattle.findUnique({
       where: { id: battleId },
       include: { players: true },
@@ -164,18 +155,13 @@ class TeamBattleService {
       throw new Error('Battle not found');
     }
 
-    // Verify creator
-    if (battle.creatorId !== creatorId) {
+    if (battle.creatorId !== requesterId) {
       throw new Error('Only creator can remove players');
     }
 
-    if (battle.status !== 'waiting') {
-      throw new Error('Cannot remove players after battle starts');
-    }
-
-    // Cannot remove creator
-    if (targetUserId === creatorId) {
-      throw new Error('Creator cannot be removed');
+    const targetPlayer = battle.players.find(p => p.userId === targetUserId);
+    if (!targetPlayer) {
+      throw new Error('Player not found');
     }
 
     await prisma.teamBattlePlayer.deleteMany({
@@ -185,78 +171,199 @@ class TeamBattleService {
       },
     });
 
-    return this.getBattleWithDetails(battleId);
+    // Check team elimination for active battles
+    if (battle.status === 'active') {
+      const remainingPlayers = await prisma.teamBattlePlayer.findMany({
+        where: { battleId }
+      });
+
+      const teamACount = remainingPlayers.filter(p => p.team === 'A').length;
+      const teamBCount = remainingPlayers.filter(p => p.team === 'B').length;
+
+      if (teamACount === 0 || teamBCount === 0) {
+        const winningTeam = teamACount > 0 ? 'A' : 'B';
+        const eliminatedTeam = targetPlayer.team;
+
+        await prisma.teamBattle.update({
+          where: { id: battleId },
+          data: {
+            status: 'completed',
+            winningTeam: winningTeam,
+          },
+        });
+
+        const updatedBattle = await this.getBattleWithDetails(battleId);
+
+        return {
+          battle: updatedBattle,
+          removedPlayer: {
+            userId: targetPlayer.userId,
+            username: targetPlayer.username,
+            team: targetPlayer.team,
+          },
+          teamEliminated: true,
+          eliminatedTeam: eliminatedTeam,
+          winningTeam: winningTeam,
+          battleEnded: true,
+        };
+      }
+    }
+
+    const updatedBattle = await this.getBattleWithDetails(battleId);
+
+    return {
+      battle: updatedBattle,
+      removedPlayer: {
+        userId: targetPlayer.userId,
+        username: targetPlayer.username,
+        team: targetPlayer.team,
+      },
+      teamEliminated: false,
+      battleEnded: false,
+    };
   }
 
   /**
-   * Leave team battle
+   * Leave team battle - FIXED VERSION
    */
-  async leaveBattle(battleId, userId) {
-    const battle = await prisma.teamBattle.findUnique({
-      where: { id: battleId },
-      include: { players: true },
-    });
+ // In teamBattle.service.js - VERIFY leaveBattle method
 
-    if (!battle) {
-      throw new Error('Battle not found');
-    }
+async leaveBattle(battleId, userId) {
+  console.log("🚪 Leave battle request:", { battleId, userId });
 
-    if (battle.players.length === 0) {
-      return { deleted: false, alreadyLeft: true };
-    }
+  const battle = await prisma.teamBattle.findUnique({
+    where: { id: battleId },
+    include: { players: true },
+  });
 
-    let player = battle.players.find(p => p.userId === userId);
-    
-    if (!player) {
-      player = battle.players.find(p => String(p.userId) === String(userId));
-    }
-    
-    if (!player) {
-      throw new Error('You are not in this battle');
-    }
+  if (!battle) {
+    throw new Error('Battle not found');
+  }
 
-    // Cannot leave if battle is active
-    if (battle.status === 'active') {
-      throw new Error('Cannot leave battle while it is active');
-    }
+  if (battle.players.length === 0) {
+    return { deleted: false, alreadyLeft: true };
+  }
 
-    // If user is creator and there are other players, transfer ownership or delete battle
+  // Find player
+  let player = battle.players.find(p => p.userId === userId);
+  if (!player) {
+    player = battle.players.find(p => String(p.userId) === String(userId));
+  }
+  
+  if (!player) {
+    throw new Error('You are not in this battle');
+  }
+
+  console.log(`📍 Found player: ${player.username} in Team ${player.team}`);
+
+  // WAITING STATUS
+  if (battle.status === 'waiting') {
     if (String(battle.creatorId) === String(userId)) {
       if (battle.players.length > 1) {
         const newCreator = battle.players.find(p => String(p.userId) !== String(userId));
         
         await prisma.teamBattle.update({
           where: { id: battleId },
-          data: {
-            creatorId: newCreator.userId,
-          },
-        });
-      } else {
-        await prisma.teamBattleProblem.deleteMany({
-          where: { battleId },
+          data: { creatorId: newCreator.userId },
         });
         
-        await prisma.teamBattlePlayer.deleteMany({
-          where: { battleId },
-        });
+        console.log(`👑 Creator role transferred to ${newCreator.username}`);
+     } else {
+        const battleCode = battle.battleCode;
         
-        await prisma.teamBattle.delete({
-          where: { id: battleId },
-        });
+        await prisma.teamBattleProblem.deleteMany({ where: { battleId } });
+        await prisma.teamBattlePlayer.deleteMany({ where: { battleId } });
+        await prisma.teamBattle.delete({ where: { id: battleId } });
         
-        return { deleted: true };
+        battleMemory.removeBattle(battleId);
+        
+        console.log(`🗑️ Battle deleted`);
+        return { 
+          deleted: true, 
+          teamEliminated: false, 
+          battleCode: battleCode 
+        };
       }
     }
 
     await prisma.teamBattlePlayer.deleteMany({
-      where: {
-        battleId,
-        userId: player.userId,
-      },
+      where: { battleId, userId: player.userId },
     });
 
-    return { deleted: false };
+    console.log(`✅ Player removed from waiting battle`);
+    return { 
+      deleted: false, 
+      teamEliminated: false 
+    };
   }
+
+  // ACTIVE STATUS - CRITICAL SECTION
+  if (battle.status === 'active') {
+    console.log(`⚠️ Player leaving active battle`);
+
+    // Remove player first
+    await prisma.teamBattlePlayer.deleteMany({
+      where: { battleId, userId: player.userId },
+    });
+
+    // Check remaining players
+    const remainingPlayers = await prisma.teamBattlePlayer.findMany({
+      where: { battleId }
+    });
+
+    const teamACount = remainingPlayers.filter(p => p.team === 'A').length;
+    const teamBCount = remainingPlayers.filter(p => p.team === 'B').length;
+
+    console.log(`📊 After removal - Team A: ${teamACount}, Team B: ${teamBCount}`);
+
+    // CRITICAL: Check if a team is now empty
+    if (teamACount === 0 || teamBCount === 0) {
+      const winningTeam = teamACount > 0 ? 'A' : 'B';
+      const eliminatedTeam = player.team; // The team the leaving player was on
+
+      console.log(`🏆 TEAM ELIMINATION! Team ${eliminatedTeam} eliminated, Team ${winningTeam} wins`);
+
+      // Update battle status
+      await prisma.teamBattle.update({
+        where: { id: battleId },
+        data: {
+          status: 'completed',
+          winningTeam: winningTeam,
+        },
+      });
+
+      // Update memory
+      battleMemory.updateBattleStatus(battleId, 'completed', {
+        winningTeam: winningTeam
+      });
+
+      console.log('✅ Returning team elimination result');
+      
+      // CRITICAL: Return the correct structure
+      return {
+        deleted: false,
+        teamEliminated: true,        // ← This must be true!
+        eliminatedTeam: eliminatedTeam,
+        winningTeam: winningTeam,
+        battleEnded: true,           // ← This must be true!
+        removedPlayer: {
+          userId: player.userId,
+          username: player.username,
+          team: player.team,
+        }
+      };
+    }
+
+    console.log(`✅ Player removed, battle continues`);
+    return {
+      deleted: false,
+      teamEliminated: false,
+      battleEnded: false,
+    };
+  }
+
+  throw new Error('Cannot leave completed battle');
+}
 
   /**
    * Start team battle
@@ -279,7 +386,6 @@ class TeamBattleService {
       throw new Error('Battle already started');
     }
 
-    // Check minimum players
     const teamACount = battle.players.filter(p => p.team === 'A').length;
     const teamBCount = battle.players.filter(p => p.team === 'B').length;
 
@@ -388,7 +494,7 @@ class TeamBattleService {
       return false;
     }
 
-    const updated = await prisma.teamBattleProblem.update({
+    await prisma.teamBattleProblem.update({
       where: {
         battleId_problemIndex: {
           battleId,
@@ -408,7 +514,7 @@ class TeamBattleService {
   }
 
   /**
-   * NEW: Record individual solve (for total-solves mode)
+   * Record individual solve (for total-solves mode)
    */
   async recordIndividualSolve(battleId, problemIndex, userId, username, team, points, solvedAt) {
     try {
@@ -426,7 +532,6 @@ class TeamBattleService {
       return true;
     } catch (error) {
       if (error.code === 'P2002') {
-        // Unique constraint violation - user already solved this problem
         return false;
       }
       throw error;
@@ -458,127 +563,113 @@ class TeamBattleService {
   }
 
   /**
-   * UPDATED: Get battle statistics (handles both modes)
+   * Get battle stats with tie-breaking
    */
+  async getBattleStats(battleId) {
+    const battle = await prisma.teamBattle.findUnique({
+      where: { id: battleId },
+      select: { 
+        winningStrategy: true,
+        problems: true 
+      }
+    });
+
+    if (!battle) {
+      return null;
+    }
+
+    if (battle.winningStrategy === 'first-solve') {
+      const problems = battle.problems;
+      
+      const teamAScore = problems
+        .filter(p => p.solvedBy === 'A')
+        .reduce((sum, p) => sum + p.points, 0);
+      
+      const teamBScore = problems
+        .filter(p => p.solvedBy === 'B')
+        .reduce((sum, p) => sum + p.points, 0);
+
+      return {
+        teamAScore,
+        teamBScore,
+        problemsSolved: {
+          teamA: problems.filter(p => p.solvedBy === 'A').length,
+          teamB: problems.filter(p => p.solvedBy === 'B').length,
+        }
+      };
+    } else {
+      const teamASolves = await prisma.teamBattleProblemSolve.findMany({
+        where: { battleId, team: 'A' },
+        orderBy: { solvedAt: 'desc' },
+        select: { points: true, solvedAt: true, problemIndex: true }
+      });
+
+      const teamBSolves = await prisma.teamBattleProblemSolve.findMany({
+        where: { battleId, team: 'B' },
+        orderBy: { solvedAt: 'desc' },
+        select: { points: true, solvedAt: true, problemIndex: true }
+      });
+
+      const teamAScore = teamASolves.reduce((sum, s) => sum + s.points, 0);
+      const teamBScore = teamBSolves.reduce((sum, s) => sum + s.points, 0);
+
+      const teamAUniqueSolves = new Set(teamASolves.map(s => s.problemIndex)).size;
+      const teamBUniqueSolves = new Set(teamBSolves.map(s => s.problemIndex)).size;
+
+      const teamALastSolve = teamASolves.length > 0 ? teamASolves[0].solvedAt : null;
+      const teamBLastSolve = teamBSolves.length > 0 ? teamBSolves[0].solvedAt : null;
+
+      return {
+        teamAScore,
+        teamBScore,
+        problemsSolved: {
+          teamA: teamAUniqueSolves,
+          teamB: teamBUniqueSolves,
+        },
+        lastSolveTime: {
+          teamA: teamALastSolve,
+          teamB: teamBLastSolve,
+        }
+      };
+    }
+  }
+
   /**
- * Get battle stats with tie-breaking for total-solves mode
- */
-async getBattleStats(battleId) {
-  const battle = await prisma.teamBattle.findUnique({
-    where: { id: battleId },
-    select: { 
-      winningStrategy: true,
-      problems: true 
-    }
-  });
+   * Determine winner with tie-breaking
+   */
+  determineWinnerWithTieBreak(stats) {
+    const { teamAScore, teamBScore, lastSolveTime } = stats;
 
-  if (!battle) {
+    if (!lastSolveTime) {
+      if (teamAScore > teamBScore) return 'A';
+      if (teamBScore > teamAScore) return 'B';
+      return null;
+    }
+
+    if (teamAScore > teamBScore) {
+      return 'A';
+    } else if (teamBScore > teamAScore) {
+      return 'B';
+    } else if (teamAScore === teamBScore && teamAScore > 0) {
+      if (!lastSolveTime.teamA && !lastSolveTime.teamB) {
+        return null;
+      }
+      
+      if (!lastSolveTime.teamB) {
+        return 'A';
+      }
+      
+      if (!lastSolveTime.teamA) {
+        return 'B';
+      }
+
+      const teamATime = new Date(lastSolveTime.teamA).getTime();
+      const teamBTime = new Date(lastSolveTime.teamB).getTime();
+      return teamATime < teamBTime ? 'A' : 'B';
+    }
+
     return null;
   }
-
-  if (battle.winningStrategy === 'first-solve') {
-    // First-solve mode: Simple point counting
-    const problems = battle.problems;
-    
-    const teamAScore = problems
-      .filter(p => p.solvedBy === 'A')
-      .reduce((sum, p) => sum + p.points, 0);
-    
-    const teamBScore = problems
-      .filter(p => p.solvedBy === 'B')
-      .reduce((sum, p) => sum + p.points, 0);
-
-    return {
-      teamAScore,
-      teamBScore,
-      problemsSolved: {
-        teamA: problems.filter(p => p.solvedBy === 'A').length,
-        teamB: problems.filter(p => p.solvedBy === 'B').length,
-      }
-    };
-  } else {
-    // Total-solves mode: Sum all solves + tie-breaking info
-    const teamASolves = await prisma.teamBattleProblemSolve.findMany({
-      where: { battleId, team: 'A' },
-      orderBy: { solvedAt: 'desc' },
-      select: { points: true, solvedAt: true, problemIndex: true }
-    });
-
-    const teamBSolves = await prisma.teamBattleProblemSolve.findMany({
-      where: { battleId, team: 'B' },
-      orderBy: { solvedAt: 'desc' },
-      select: { points: true, solvedAt: true, problemIndex: true }
-    });
-
-    const teamAScore = teamASolves.reduce((sum, s) => sum + s.points, 0);
-    const teamBScore = teamBSolves.reduce((sum, s) => sum + s.points, 0);
-
-    // Count unique problems solved by each team
-    const teamAUniqueSolves = new Set(teamASolves.map(s => s.problemIndex)).size;
-    const teamBUniqueSolves = new Set(teamBSolves.map(s => s.problemIndex)).size;
-
-    // FIXED: Get LAST solve time (most recent, not first)
-    // Since we ordered by 'desc', the first item is the most recent
-    const teamALastSolve = teamASolves.length > 0 ? teamASolves[0].solvedAt : null;
-    const teamBLastSolve = teamBSolves.length > 0 ? teamBSolves[0].solvedAt : null;
-
-    return {
-      teamAScore,
-      teamBScore,
-      problemsSolved: {
-        teamA: teamAUniqueSolves,
-        teamB: teamBUniqueSolves,
-      },
-      lastSolveTime: {
-        teamA: teamALastSolve,
-        teamB: teamBLastSolve,
-      }
-    };
-  }
 }
-
-/**
- * Determine winner for total-solves mode with tie-breaking
- */
-determineWinnerWithTieBreak(stats) {
-  const { teamAScore, teamBScore, lastSolveTime } = stats;
-
-  // FIXED: Added validation for lastSolveTime
-  if (!lastSolveTime) {
-    // Fallback for first-solve mode or missing data
-    if (teamAScore > teamBScore) return 'A';
-    if (teamBScore > teamAScore) return 'B';
-    return null;
-  }
-
-  if (teamAScore > teamBScore) {
-    return 'A';
-  } else if (teamBScore > teamAScore) {
-    return 'B';
-  } else if (teamAScore === teamBScore && teamAScore > 0) {
-    // Tie in points - check last solve time
-    if (!lastSolveTime.teamA && !lastSolveTime.teamB) {
-      return null; // Both teams have 0 points
-    }
-    
-    if (!lastSolveTime.teamB) {
-      return 'A'; // Only team A solved something
-    }
-    
-    if (!lastSolveTime.teamA) {
-      return 'B'; // Only team B solved something
-    }
-
-    // FIXED: Team with EARLIER last solve wins (finished faster)
-    // Convert to timestamps for reliable comparison
-    const teamATime = new Date(lastSolveTime.teamA).getTime();
-    const teamBTime = new Date(lastSolveTime.teamB).getTime();
-    return teamATime < teamBTime ? 'A' : 'B';
-  }
-
-  return null; // Draw (both 0 points)
-}
-}
-
 
 module.exports = new TeamBattleService();
