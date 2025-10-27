@@ -267,7 +267,7 @@ exports.getActiveTeamBattle = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const prisma = require('../config/database.config');
+    // ✅ REMOVED duplicate prisma import - use the one from top of file
     const activeBattle = await prisma.teamBattle.findFirst({
       where: {
         status: {
