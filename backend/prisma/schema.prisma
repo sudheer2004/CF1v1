@@ -11,70 +11,70 @@ datasource db {
 
 // User Model
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  password      String?  // Null for Google OAuth users
-  username      String   @unique
-  cfHandle      String?  @unique // Codeforces handle
-  googleId      String?  @unique
-  rating        Int      @default(0)
-  wins          Int      @default(0)
-  losses        Int      @default(0)
-  draws         Int      @default(0)
-  totalMatches  Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(uuid())
+  email        String   @unique
+  password     String? // Null for Google OAuth users
+  username     String   @unique
+  cfHandle     String?  @unique // Codeforces handle
+  googleId     String?  @unique
+  rating       Int      @default(0)
+  wins         Int      @default(0)
+  losses       Int      @default(0)
+  draws        Int      @default(0)
+  totalMatches Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   // Relations
-  matchesAsPlayer1  Match[]  @relation("Player1Matches")
-  matchesAsPlayer2  Match[]  @relation("Player2Matches")
-  wonMatches        Match[]  @relation("WonMatches")
-  createdDuels      Duel[]   @relation("DuelCreator")
-  joinedDuels       Duel[]   @relation("DuelOpponent")
-  queueEntries      MatchmakingQueue[]
+  matchesAsPlayer1 Match[]            @relation("Player1Matches")
+  matchesAsPlayer2 Match[]            @relation("Player2Matches")
+  wonMatches       Match[]            @relation("WonMatches")
+  createdDuels     Duel[]             @relation("DuelCreator")
+  joinedDuels      Duel[]             @relation("DuelOpponent")
+  queueEntries     MatchmakingQueue[]
 }
 
 // Matchmaking Queue
 model MatchmakingQueue {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ratingMin   Int
-  ratingMax   Int
-  tags        String[] // Array of problem tags
-  duration    Int      // Match duration in minutes
-  status      String   @default("waiting") // waiting, matched, cancelled
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ratingMin Int
+  ratingMax Int
+  tags      String[] // Array of problem tags
+  duration  Int // Match duration in minutes
+  status    String   @default("waiting") // waiting, matched, cancelled
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status, createdAt])
 }
 
 // Duel (Friend Challenge)
 model Duel {
-  id          String   @id @default(uuid())
-  duelCode    String   @unique // 8-character code
-  creatorId   String
-  creator     User     @relation("DuelCreator", fields: [creatorId], references: [id], onDelete: Cascade)
-  opponentId  String?
-  opponent    User?    @relation("DuelOpponent", fields: [opponentId], references: [id], onDelete: Cascade)
-  
-  ratingMin   Int
-  ratingMax   Int
-  tags        String[]
-  duration    Int
-  
-  problemId   String?  // contestId-index (e.g., "1234-A")
-  problemName String?
+  id         String  @id @default(uuid())
+  duelCode   String  @unique // 8-character code
+  creatorId  String
+  creator    User    @relation("DuelCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  opponentId String?
+  opponent   User?   @relation("DuelOpponent", fields: [opponentId], references: [id], onDelete: Cascade)
+
+  ratingMin Int
+  ratingMax Int
+  tags      String[]
+  duration  Int
+
+  problemId     String? // contestId-index (e.g., "1234-A")
+  problemName   String?
   problemRating Int?
-  
-  status      String   @default("waiting") // waiting, active, completed, cancelled
-  startTime   DateTime?
-  endTime     DateTime?
-  winnerId    String?
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  status    String    @default("waiting") // waiting, active, completed, cancelled
+  startTime DateTime?
+  endTime   DateTime?
+  winnerId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([duelCode])
   @@index([status])
@@ -82,44 +82,44 @@ model Duel {
 
 // Match (Active Match)
 model Match {
-  id          String   @id @default(uuid())
-  
-  player1Id   String
-  player1     User     @relation("Player1Matches", fields: [player1Id], references: [id], onDelete: Cascade)
-  
-  player2Id   String
-  player2     User     @relation("Player2Matches", fields: [player2Id], references: [id], onDelete: Cascade)
-  
-  problemId   String   // contestId-index
-  problemName String
+  id String @id @default(uuid())
+
+  player1Id String
+  player1   User   @relation("Player1Matches", fields: [player1Id], references: [id], onDelete: Cascade)
+
+  player2Id String
+  player2   User   @relation("Player2Matches", fields: [player2Id], references: [id], onDelete: Cascade)
+
+  problemId     String // contestId-index
+  problemName   String
   problemRating Int?
-  problemTags String[]
-  
-  duration    Int      // in minutes
-  status      String   @default("active") // active, completed
-  
-  startTime   DateTime @default(now())
-  endTime     DateTime?
-  
-  winnerId    String?  // null = draw
-  winner      User?    @relation("WonMatches", fields: [winnerId], references: [id])
-  
+  problemTags   String[]
+
+  duration Int // in minutes
+  status   String @default("active") // active, completed
+
+  startTime DateTime  @default(now())
+  endTime   DateTime?
+
+  winnerId String? // null = draw
+  winner   User?   @relation("WonMatches", fields: [winnerId], references: [id])
+
   player1Submissions Json[] @default([]) // Array of submission objects
   player2Submissions Json[] @default([]) // Array of submission objects
-  
+
   player1RatingBefore Int
   player1RatingAfter  Int?
   player1RatingChange Int?
-  
+
   player2RatingBefore Int
   player2RatingAfter  Int?
   player2RatingChange Int?
-  
-  player1Attempts     Int      @default(0)  // Number of attempts by player 1
-  player2Attempts     Int      @default(0)  // Number of attempts by player 2
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  player1Attempts Int @default(0) // Number of attempts by player 1
+  player2Attempts Int @default(0) // Number of attempts by player 2
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([player1Id, createdAt])
@@ -128,46 +128,60 @@ model Match {
 
 //user chat message schema
 model Message {
-  id          String   @id @default(uuid())
-  matchId     String
-  senderId    String
-  senderName  String
-  content     String
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  matchId    String
+  senderId   String
+  senderName String
+  content    String
+  createdAt  DateTime @default(now())
 
   @@index([matchId, createdAt])
+}
+
+// Global message schema
+model GlobalMessage {
+  id        String   @id @default(uuid())
+  content   String
+  createdAt DateTime @default(now())
+
+  // Relations
+  senderId   String
+  senderName String   // De-normalized for easy access
+  sender     User     @relation(fields: [senderId], references: [id], onDelete: Cascade) // To maintain data integrity
+
+  @@index([createdAt])
 }
 
 // ==================== TEAM BATTLE MODELS (UPDATED) ====================
 
 // Team Battle Room
 model TeamBattle {
-  id            String   @id @default(uuid())
-  battleCode    String   @unique // 8-character room code
-  creatorId     String
-  
+  id         String @id @default(uuid())
+  battleCode String @unique // 8-character room code
+  creatorId  String
+
   // Settings
-  duration      Int      // Match duration in minutes
-  numProblems   Int      // Number of problems (1-6)
+  duration        Int // Match duration in minutes
+  numProblems     Int // Number of problems (1-6)
   winningStrategy String @default("first-solve") // NEW: "first-solve" or "total-solves"
-  
+
   // Status
-  status        String   @default("waiting") // waiting, active, completed, cancelled
-  
-  startTime     DateTime?
-  endTime       DateTime?
-  
+  status String @default("waiting") // waiting, active, completed, cancelled
+
+  startTime DateTime?
+  endTime   DateTime?
+
   // Winner (null = draw)
-  winningTeam   String?  // "A" or "B" or null
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+  winningTeam String? // "A" or "B" or null
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  players       TeamBattlePlayer[]
-  problems      TeamBattleProblem[]
-  solves        TeamBattleProblemSolve[] // NEW: for total-solves tracking
-  
+  players  TeamBattlePlayer[]
+  problems TeamBattleProblem[]
+  solves   TeamBattleProblemSolve[] // NEW: for total-solves tracking
+
   @@index([battleCode])
   @@index([status])
   @@index([creatorId])
@@ -175,80 +189,80 @@ model TeamBattle {
 
 // Team Battle Player
 model TeamBattlePlayer {
-  id          String      @id @default(uuid())
-  battleId    String
-  battle      TeamBattle  @relation(fields: [battleId], references: [id], onDelete: Cascade)
-  
-  userId      String
-  username    String
-  cfHandle    String
-  rating      Int
-  
-  team        String      // "A" or "B"
-  position    Int         // 0-3 (slot position)
-  isCreator   Boolean     @default(false)
-  
-  createdAt   DateTime    @default(now())
-  
+  id       String     @id @default(uuid())
+  battleId String
+  battle   TeamBattle @relation(fields: [battleId], references: [id], onDelete: Cascade)
+
+  userId   String
+  username String
+  cfHandle String
+  rating   Int
+
+  team      String // "A" or "B"
+  position  Int // 0-3 (slot position)
+  isCreator Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
   @@unique([battleId, userId])
   @@index([battleId, team])
 }
 
 // Team Battle Problem Configuration
 model TeamBattleProblem {
-  id            String      @id @default(uuid())
-  battleId      String
-  battle        TeamBattle  @relation(fields: [battleId], references: [id], onDelete: Cascade)
-  
-  problemIndex  Int         // 0-5 (problem number)
-  points        Int         @default(100) // Points for this problem
-  
+  id       String     @id @default(uuid())
+  battleId String
+  battle   TeamBattle @relation(fields: [battleId], references: [id], onDelete: Cascade)
+
+  problemIndex Int // 0-5 (problem number)
+  points       Int @default(100) // Points for this problem
+
   // Problem source configuration
-  useCustomLink Boolean     @default(false)
+  useCustomLink Boolean @default(false)
   customLink    String?
-  
+
   // Rating-based configuration
-  rating        Int?
-  useRange      Boolean     @default(false)
-  ratingMin     Int?
-  ratingMax     Int?
-  minYear       Int?
-  
+  rating    Int?
+  useRange  Boolean @default(false)
+  ratingMin Int?
+  ratingMax Int?
+  minYear   Int?
+
   // Selected problem (filled when match starts)
-  contestId     Int?
-  problemIndexChar String?   // "A", "B", "C", etc.
-  problemName   String?
-  problemRating Int?
-  problemUrl    String?
-  
+  contestId        Int?
+  problemIndexChar String? // "A", "B", "C", etc.
+  problemName      String?
+  problemRating    Int?
+  problemUrl       String?
+
   // Solving status (for first-solve mode)
-  solvedBy      String?     // "A" or "B" or null
-  solvedByUserId String?
+  solvedBy         String? // "A" or "B" or null
+  solvedByUserId   String?
   solvedByUsername String?
-  solvedAt      DateTime?
-  
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  
+  solvedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([battleId, problemIndex])
   @@index([battleId])
 }
 
 // NEW: Team Battle Problem Solve (for total-solves mode)
 model TeamBattleProblemSolve {
-  id            String      @id @default(uuid())
-  battleId      String
-  battle        TeamBattle  @relation(fields: [battleId], references: [id], onDelete: Cascade)
-  
-  problemIndex  Int         // Which problem was solved
-  userId        String      // Who solved it
-  username      String
-  team          String      // "A" or "B"
-  points        Int         // Points earned
-  solvedAt      DateTime
-  
-  createdAt     DateTime    @default(now())
-  
+  id       String     @id @default(uuid())
+  battleId String
+  battle   TeamBattle @relation(fields: [battleId], references: [id], onDelete: Cascade)
+
+  problemIndex Int // Which problem was solved
+  userId       String // Who solved it
+  username     String
+  team         String // "A" or "B"
+  points       Int // Points earned
+  solvedAt     DateTime
+
+  createdAt DateTime @default(now())
+
   @@unique([battleId, problemIndex, userId]) // Each user can only solve each problem once
   @@index([battleId, team])
   @@index([battleId, problemIndex])
@@ -256,20 +270,20 @@ model TeamBattleProblemSolve {
 
 // Team Battle Attempt Tracking
 model TeamBattleAttempt {
-  id          String   @id @default(uuid())
-  battleId    String
-  userId      String
-  username    String
-  team        String   // "A" or "B"
+  id           String @id @default(uuid())
+  battleId     String
+  userId       String
+  username     String
+  team         String // "A" or "B"
   problemIndex Int
-  
-  submissionId Int     // Codeforces submission ID
-  verdict     String   // OK, WRONG_ANSWER, etc.
-  timestamp   DateTime
-  
-  createdAt   DateTime @default(now())
-  
+
+  submissionId Int // Codeforces submission ID
+  verdict      String // OK, WRONG_ANSWER, etc.
+  timestamp    DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([battleId, submissionId])
   @@index([battleId, userId])
   @@index([battleId, problemIndex])
-  @@unique([battleId, submissionId])
 }
