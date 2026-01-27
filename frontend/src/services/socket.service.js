@@ -1,4 +1,4 @@
-import { io } from 'socket.io-client';
+import { io } from "socket.io-client";
 
 class SocketService {
   constructor() {
@@ -9,19 +9,14 @@ class SocketService {
 
   connect() {
     if (this.socket?.connected) {
-     
       return this.socket;
     }
 
-  
-    
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-    const socketUrl = apiUrl.replace('/api', '');
-    
-    
-    
+    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5001";
+    const socketUrl = apiUrl.replace("/api", "");
+
     this.socket = io(socketUrl, {
-      transports: ['websocket', 'polling'],
+      transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
@@ -30,51 +25,51 @@ class SocketService {
       autoConnect: true,
     });
 
-    this.socket.on('connect', () => {
-    
-      
-      const token = localStorage.getItem('token');
+    this.socket.on("connect", () => {
+      const token = localStorage.getItem("token");
+
+      console.log(" Connected ", token);
+
       if (token && !this.authenticated) {
-     
         this.authenticate(token);
       }
     });
 
-    this.socket.on('disconnect', (reason) => {
-    
+    this.socket.on("disconnect", (reason) => {
       this.authenticated = false;
     });
 
-    this.socket.on('connect_error', (error) => {
-      console.error('🔴 Socket connection error:', error.message);
-      console.error('Full error:', error);
+    this.socket.on("connect_error", (error) => {
+      console.error("🔴 Socket connection error:", error.message);
+      console.error("Full error:", error);
     });
 
     // FIXED: Better error handling
-    this.socket.on('error', (errorData) => {
-      console.error('🔴 Socket error event received:', errorData);
-      
+    this.socket.on("error", (errorData) => {
+      console.error("🔴 Socket error event received:", errorData);
+
       // Extract the message from various error formats
-      let errorMessage = 'An error occurred';
-      
-      if (typeof errorData === 'string') {
+      let errorMessage = "An error occurred";
+
+      if (typeof errorData === "string") {
         errorMessage = errorData;
-      } else if (errorData && typeof errorData === 'object') {
-        errorMessage = errorData.message || errorData.error || JSON.stringify(errorData);
+      } else if (errorData && typeof errorData === "object") {
+        errorMessage =
+          errorData.message || errorData.error || JSON.stringify(errorData);
       }
-      
-      console.error('🔴 Processed error message:', errorMessage);
-      
+
+      console.error("🔴 Processed error message:", errorMessage);
+
       // Dispatch as a custom window event so any component can listen
-      window.dispatchEvent(new CustomEvent('socket-error', { 
-        detail: { message: errorMessage, originalError: errorData } 
-      }));
+      window.dispatchEvent(
+        new CustomEvent("socket-error", {
+          detail: { message: errorMessage, originalError: errorData },
+        }),
+      );
     });
 
-    this.socket.on('connect', () => {
-      this.eventHandlers.forEach((handler, event) => {
-      
-      });
+    this.socket.on("connect", () => {
+      this.eventHandlers.forEach((handler, event) => {});
     });
 
     return this.socket;
@@ -82,17 +77,15 @@ class SocketService {
 
   authenticate(token) {
     if (!this.socket?.connected) {
-    
-      
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
-          reject(new Error('Connection timeout'));
+          reject(new Error("Connection timeout"));
         }, 10000);
 
         const checkConnection = () => {
           if (this.socket?.connected) {
             clearTimeout(timeout);
-            this.socket.off('connect', checkConnection);
+            this.socket.off("connect", checkConnection);
             this.doAuthenticate(token).then(resolve).catch(reject);
           }
         };
@@ -101,7 +94,7 @@ class SocketService {
           clearTimeout(timeout);
           this.doAuthenticate(token).then(resolve).catch(reject);
         } else {
-          this.socket.on('connect', checkConnection);
+          this.socket.on("connect", checkConnection);
         }
       });
     }
@@ -110,24 +103,23 @@ class SocketService {
   }
 
   doAuthenticate(token) {
-  
-    this.socket.emit('authenticate', token);
+    this.socket.emit("authenticate", token);
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Authentication timeout'));
+        reject(new Error("Authentication timeout"));
       }, 5000);
 
-      this.socket.once('authenticated', (data) => {
+      this.socket.once("authenticated", (data) => {
         clearTimeout(timeout);
         this.authenticated = true;
-       
+
         resolve(data);
       });
 
-      this.socket.once('error', (error) => {
+      this.socket.once("error", (error) => {
         clearTimeout(timeout);
-        console.error('❌ Authentication failed:', error);
+        console.error("❌ Authentication failed:", error);
         reject(error);
       });
     });
@@ -135,7 +127,6 @@ class SocketService {
 
   disconnect() {
     if (this.socket) {
-    
       this.socket.disconnect();
       this.socket = null;
       this.authenticated = false;
@@ -145,10 +136,10 @@ class SocketService {
 
   on(event, handler) {
     if (!this.socket) {
-      console.warn('⚠️ Socket not initialized');
+      console.warn("⚠️ Socket not initialized");
       return;
     }
-    
+
     this.eventHandlers.set(event, handler);
     this.socket.on(event, handler);
   }
@@ -165,17 +156,18 @@ class SocketService {
   }
 
   emit(event, data) {
+    console.log(" Event :: ", data);
+
     if (!this.socket?.connected) {
-      console.error('❌ Cannot emit, socket not connected');
+      console.error("❌ Cannot emit, socket not connected");
       return;
     }
-    
-  
+
     this.socket.emit(event, data);
   }
 
   // ==================== MATCHMAKING ====================
-  
+
   /**
    * Join matchmaking queue with optional year filter
    * @param {Object} criteria - Matchmaking criteria
@@ -186,12 +178,10 @@ class SocketService {
    * @param {number} criteria.minYear - Minimum problem year (optional, e.g. 2024)
    */
   joinMatchmaking(criteria) {
-   
-    
     // Validate criteria before sending
     if (!criteria.ratingMin || !criteria.ratingMax || !criteria.duration) {
-      console.error('❌ Invalid matchmaking criteria:', criteria);
-      throw new Error('Missing required matchmaking criteria');
+      console.error("❌ Invalid matchmaking criteria:", criteria);
+      throw new Error("Missing required matchmaking criteria");
     }
 
     // Ensure minYear is either null or a valid number
@@ -200,19 +190,18 @@ class SocketService {
       ratingMax: criteria.ratingMax,
       duration: criteria.duration,
       tags: criteria.tags || [],
-      minYear: criteria.minYear || null // Support year filter
+      minYear: criteria.minYear || null, // Support year filter
     };
 
-    this.emit('join-matchmaking', validCriteria);
+    this.emit("join-matchmaking", validCriteria);
   }
 
   leaveMatchmaking() {
-   
-    this.emit('leave-matchmaking');
+    this.emit("leave-matchmaking");
   }
 
   // ==================== DUEL ====================
-  
+
   /**
    * Create a duel with optional year filter
    * @param {Object} settings - Duel settings
@@ -223,80 +212,69 @@ class SocketService {
    * @param {number} settings.minYear - Minimum problem year (optional)
    */
   createDuel(settings) {
- 
-    
     const validSettings = {
       ...settings,
       tags: settings.tags || [],
-      minYear: settings.minYear || null // Support year filter
+      minYear: settings.minYear || null, // Support year filter
     };
 
-    this.emit('create-duel', validSettings);
+    this.emit("create-duel", validSettings);
   }
 
   joinDuel(duelCode) {
-    
-    this.emit('join-duel', duelCode);
+    this.emit("join-duel", duelCode);
   }
 
   // ==================== MATCH ACTIONS ====================
-  
+
   giveUp(matchId) {
-   
-    this.emit('give-up', { matchId });
+    this.emit("give-up", { matchId });
   }
 
   offerDraw(matchId) {
-   
-    this.emit('offer-draw', { matchId });
+    this.emit("offer-draw", { matchId });
   }
 
   acceptDraw(matchId) {
-  
-    this.emit('accept-draw', { matchId });
+    this.emit("accept-draw", { matchId });
   }
 
   rejectDraw(matchId) {
-  
-    this.emit('reject-draw', { matchId });
+    this.emit("reject-draw", { matchId });
   }
 
   // ==================== CHAT METHODS ====================
-  
+
   getMatchMessages(matchId) {
-    
-    this.emit('get-match-messages', { matchId });
+    this.emit("get-match-messages", { matchId });
   }
 
   sendMessage(matchId, content) {
-    
-    this.emit('send-message', { matchId, content });
+    this.emit("send-message", { matchId, content });
   }
 
   onNewMessage(matchId, handler) {
     const event = `new-message-${matchId}`;
-  
+
     this.on(event, handler);
   }
 
   offNewMessage(matchId, handler) {
     const event = `new-message-${matchId}`;
-  
+
     this.off(event, handler);
   }
 
   onMessagesLoaded(handler) {
-  
-    this.on('match-messages-loaded', handler);
+    this.on("match-messages-loaded", handler);
   }
 
   offMessagesLoaded(handler) {
-   
-    this.off('match-messages-loaded', handler);
+    this.off("match-messages-loaded", handler);
   }
 
   // ==================== UTILITY METHODS ====================
-  
+
   getSocket() {
     return this.socket;
   }
@@ -322,8 +300,8 @@ class SocketService {
       }
 
       const timer = setTimeout(() => {
-        this.socket?.off('connect', onConnect);
-        reject(new Error('Connection timeout'));
+        this.socket?.off("connect", onConnect);
+        reject(new Error("Connection timeout"));
       }, timeout);
 
       const onConnect = () => {
@@ -331,7 +309,7 @@ class SocketService {
         resolve(true);
       };
 
-      this.socket?.once('connect', onConnect);
+      this.socket?.once("connect", onConnect);
     });
   }
 }

@@ -1,12 +1,14 @@
-const prisma = require('../config/database.config');
+const prisma = require("../config/database.config");
+const userService = require("../services/user.service");
 
 class MessageService {
   async createMessage(matchId, senderId, senderName, content) {
     try {
-    
       // Validate inputs
       if (!matchId || !senderId || !senderName || !content) {
-        throw new Error(`Missing required fields: matchId=${!!matchId}, senderId=${!!senderId}, senderName=${!!senderName}, content=${!!content}`);
+        throw new Error(
+          `Missing required fields: matchId=${!!matchId}, senderId=${!!senderId}, senderName=${!!senderName}, content=${!!content}`,
+        );
       }
 
       const message = await prisma.message.create({
@@ -18,33 +20,52 @@ class MessageService {
         },
       });
 
-     
       return message;
     } catch (error) {
-      console.error('❌ Error creating message:', error);
-      console.error('Error details:', {
+      console.error("❌ Error creating message:", error);
+      console.error("Error details:", {
         name: error.name,
         message: error.message,
         code: error.code,
-        meta: error.meta
+        meta: error.meta,
       });
       throw new Error(`Failed to create message: ${error.message}`);
     }
   }
 
+  async createGlobalMessage(sender, content) {
+    try {
+      if (!sender || !content) {
+        throw new Error("Missing required fields: sender or content");
+      }
+
+      console.log(" Here ::")
+      const sender = await userService.getUserById(sender.id);
+      const message = await prisma.globalMessage.create({
+        data: {
+          content,
+          senderId: sender.id,
+          senderName: sender.username,
+          sender,
+        },
+      });
+      return message;
+    } catch (error) {
+      console.error("❌ Error creating global message:", error);
+      throw new Error(`Failed to create global message: ${error.message}`);
+    }
+  }
+
   async getMatchMessages(matchId) {
     try {
-     
-      
       const messages = await prisma.message.findMany({
         where: { matchId },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: "asc" },
       });
 
-     
       return messages;
     } catch (error) {
-      console.error('❌ Error fetching messages:', error);
+      console.error("❌ Error fetching messages:", error);
       throw new Error(`Failed to fetch messages: ${error.message}`);
     }
   }
@@ -55,10 +76,9 @@ class MessageService {
         where: { matchId },
       });
 
-    
       return result.count;
     } catch (error) {
-      console.error('❌ Error deleting messages:', error);
+      console.error("❌ Error deleting messages:", error);
       // Don't throw - just log the error
       return 0;
     }
@@ -78,10 +98,8 @@ class MessageService {
         },
       });
 
-     
       return result.count;
     } catch (error) {
-      
       return 0;
     }
   }

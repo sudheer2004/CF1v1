@@ -32,6 +32,7 @@ model User {
   createdDuels     Duel[]             @relation("DuelCreator")
   joinedDuels      Duel[]             @relation("DuelOpponent")
   queueEntries     MatchmakingQueue[]
+  GlobalMessage    GlobalMessage[]
 }
 
 // Matchmaking Queue
@@ -146,8 +147,8 @@ model GlobalMessage {
 
   // Relations
   senderId   String
-  senderName String   // De-normalized for easy access
-  sender     User     @relation(fields: [senderId], references: [id], onDelete: Cascade) // To maintain data integrity
+  senderName String // De-normalized for easy access
+  sender     User   @relation(fields: [senderId], references: [id])
 
   @@index([createdAt])
 }
