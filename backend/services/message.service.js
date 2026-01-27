@@ -33,28 +33,37 @@ class MessageService {
     }
   }
 
-  async createGlobalMessage(sender, content) {
+
+  async createGlobalMessage(senderId, content) {
     try {
-      if (!sender || !content) {
-        throw new Error("Missing required fields: sender or content");
+      if (!senderId) throw new Error("senderId is required");
+      if (!content || !content.trim()) throw new Error("content is required");
+
+      // Fetch minimal fields needed
+      const user = await prisma.user.findUnique({
+        where: { id: senderId },
+        select: { id: true, username: true },
+      });
+
+      if (!user) {
+        throw new Error(`User not found for id: ${senderId}`);
       }
 
-      console.log(" Here ::")
-      const sender = await userService.getUserById(sender.id);
       const message = await prisma.globalMessage.create({
         data: {
-          content,
-          senderId: sender.id,
-          senderName: sender.username,
-          sender,
+          content: content.trim(),
+          senderId: user.id,           // use FK
+          senderName: user.username,   // de-normalized
         },
       });
+
       return message;
     } catch (error) {
       console.error("❌ Error creating global message:", error);
       throw new Error(`Failed to create global message: ${error.message}`);
     }
   }
+
 
   async getMatchMessages(matchId) {
     try {
