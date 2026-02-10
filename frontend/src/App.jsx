@@ -9,8 +9,11 @@ import TeamBattle from './components/TeamBattle';
 import Leaderboard from './components/Leaderboard';
 import Profile from './components/Profile';
 import ReportIssues from './components/ReportIssues';
+import GlobalChat from './components/GlobalChat'; // Floating chat
+import GlobalChatPage from './components/GlobalChatPage'; // Full page chat (NEW)
 import api from './services/api.service';
 import socketService from './services/socket.service';
+import './styles/chatStyles.css';
 
 const isDev = import.meta.env.MODE === 'development';
 const devLog = (...args) => {
@@ -30,7 +33,7 @@ export default function App() {
   const [matchTimer, setMatchTimer] = useState(0);
   const [matchAttempts, setMatchAttempts] = useState({ player1: 0, player2: 0 });
   
-  // Team Battle states (NEW - following same pattern as matches)
+  // Team Battle states
   const [activeTeamBattle, setActiveTeamBattle] = useState(null);
   const [teamBattleStats, setTeamBattleStats] = useState(null);
   const [teamBattleTimer, setTeamBattleTimer] = useState(0);
@@ -38,7 +41,7 @@ export default function App() {
   const [error, setError] = useState(null);
 
   const matchEndHandledRef = useRef(false);
-  const teamBattleEndHandledRef = useRef(false); // NEW
+  const teamBattleEndHandledRef = useRef(false);
 
   // Check authentication on mount
   useEffect(() => {
@@ -202,7 +205,7 @@ export default function App() {
     return () => clearInterval(pollInterval);
   }, [user, activeMatch, matchResult, view]);
 
-  // NEW: Poll for active team battle (fallback - same pattern as matches)
+  // Poll for active team battle (fallback)
   useEffect(() => {
     if (!user || activeTeamBattle) return;
     if (view !== 'team-battle') return;
@@ -217,7 +220,6 @@ export default function App() {
           setActiveTeamBattle(battleResponse.battle);
           setTeamBattleStats(battleResponse.stats);
           
-          // Join socket room for real-time updates
           if (socket && socketReady) {
             socket.emit('join-team-battle-room', { 
               battleCode: battleResponse.battle.battleCode 
@@ -257,7 +259,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeMatch?.match?.endTime]);
 
-  // NEW: Team Battle timer (endTime-based - same pattern as matches)
+  // Team Battle timer (endTime-based)
   useEffect(() => {
     if (!activeTeamBattle?.endTime) {
       setTeamBattleTimer(0);
@@ -364,7 +366,6 @@ export default function App() {
             setMatchAttempts(matchResponse.attempts);
             setView('matchmaking');
           } else {
-            // NEW: Check for active team battle
             try {
               const battleResponse = await api.getActiveTeamBattle();
               
@@ -375,7 +376,6 @@ export default function App() {
                 setTeamBattleStats(battleResponse.stats);
                 setView('team-battle');
                 
-                // Join socket room when reconnecting
                 if (socket && socketReady) {
                   socket.emit('join-team-battle-room', { 
                     battleCode: battleResponse.battle.battleCode 
@@ -414,9 +414,9 @@ export default function App() {
     setMatchResult(null);
     setMatchTimer(0);
     setMatchAttempts({ player1: 0, player2: 0 });
-    setActiveTeamBattle(null); // NEW
-    setTeamBattleStats(null); // NEW
-    setTeamBattleTimer(0); // NEW
+    setActiveTeamBattle(null);
+    setTeamBattleStats(null);
+    setTeamBattleTimer(0);
     setError(null);
   };
 
@@ -451,55 +451,76 @@ export default function App() {
       
       {user ? (
         <>
+          {/* Always show Navbar when user is logged in */}
           <Navbar user={user} view={view} setView={setView} onLogout={handleLogout} />
-          <main className="container mx-auto px-4 py-8 max-w-7xl">
-            {view === 'dashboard' && <Dashboard user={user} setView={setView} />}
-            {view === 'matchmaking' && (
-              <Matchmaking 
-                user={user} 
-                socket={socket}
-                socketReady={socketReady}
-                activeMatch={activeMatch}
-                setActiveMatch={setActiveMatch}
-                matchResult={matchResult}
-                setMatchResult={setMatchResult}
-                matchTimer={matchTimer}
-                setMatchTimer={setMatchTimer}
-                matchAttempts={matchAttempts}
-                setMatchAttempts={setMatchAttempts}
-              />
-            )}
-            {view === 'duel' && (
-              <DuelMode
-                user={user}
-                socket={socket}
-                socketReady={socketReady}
-                activeMatch={activeMatch}
-                setActiveMatch={setActiveMatch}
-                matchResult={matchResult}
-                setMatchResult={setMatchResult}
-                matchTimer={matchTimer}
-                setMatchTimer={setMatchTimer}
-                matchAttempts={matchAttempts}
-                setMatchAttempts={setMatchAttempts}
-              />
-            )}
-           {view === 'team-battle' && (
-            <TeamBattle
+          
+          {/* Global Chat Full Page - Renders outside main container */}
+          {view === 'global-chat' ? (
+            <GlobalChatPage
               user={user}
               socket={socket}
               socketReady={socketReady}
-              activeBattle={activeTeamBattle}           // ✅ Match prop name
-              setActiveBattle={setActiveTeamBattle}     // ✅ Match prop name
-              battleStats={teamBattleStats}             // ✅ Match prop name
-              setBattleStats={setTeamBattleStats}       // ✅ Match prop name
-              // Remove teamBattleTimer prop - it's handled internally
+              setView={setView}
+            />
+          ) : (
+            <main className="container mx-auto px-4 py-8 max-w-7xl">
+              {view === 'dashboard' && <Dashboard user={user} setView={setView} />}
+              {view === 'matchmaking' && (
+                <Matchmaking 
+                  user={user} 
+                  socket={socket}
+                  socketReady={socketReady}
+                  activeMatch={activeMatch}
+                  setActiveMatch={setActiveMatch}
+                  matchResult={matchResult}
+                  setMatchResult={setMatchResult}
+                  matchTimer={matchTimer}
+                  setMatchTimer={setMatchTimer}
+                  matchAttempts={matchAttempts}
+                  setMatchAttempts={setMatchAttempts}
+                />
+              )}
+              {view === 'duel' && (
+                <DuelMode
+                  user={user}
+                  socket={socket}
+                  socketReady={socketReady}
+                  activeMatch={activeMatch}
+                  setActiveMatch={setActiveMatch}
+                  matchResult={matchResult}
+                  setMatchResult={setMatchResult}
+                  matchTimer={matchTimer}
+                  setMatchTimer={setMatchTimer}
+                  matchAttempts={matchAttempts}
+                  setMatchAttempts={setMatchAttempts}
+                />
+              )}
+              {view === 'team-battle' && (
+                <TeamBattle
+                  user={user}
+                  socket={socket}
+                  socketReady={socketReady}
+                  activeBattle={activeTeamBattle}
+                  setActiveBattle={setActiveTeamBattle}
+                  battleStats={teamBattleStats}
+                  setBattleStats={setTeamBattleStats}
+                />
+              )}
+              {view === 'leaderboard' && <Leaderboard />}
+              {view === 'profile' && <Profile user={user} setUser={setUser} />}
+              {view === 'report-issues' && <ReportIssues user={user} />}
+            </main>
+          )}
+
+          {/* Floating Global Chat - Hidden on global-chat page */}
+          {view !== 'global-chat' && (
+            <GlobalChat
+              user={user}
+              socket={socket}
+              socketReady={socketReady}
+              setView={setView}
             />
           )}
-            {view === 'leaderboard' && <Leaderboard />}
-            {view === 'profile' && <Profile user={user} setUser={setUser} />}
-            {view === 'report-issues' && <ReportIssues user={user} />}
-          </main>
         </>
       ) : (
         <AuthPage setUser={setUser} setView={setView} />

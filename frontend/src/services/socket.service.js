@@ -28,7 +28,7 @@ class SocketService {
     this.socket.on("connect", () => {
       const token = localStorage.getItem("token");
 
-      console.log(" Connected ", token);
+      console.log("✅ Connected ", token);
 
       if (token && !this.authenticated) {
         this.authenticate(token);
@@ -44,7 +44,7 @@ class SocketService {
       console.error("Full error:", error);
     });
 
-    // FIXED: Better error handling
+    // FIXED: Better error handling - ONLY for non-authentication errors
     this.socket.on("error", (errorData) => {
       console.error("🔴 Socket error event received:", errorData);
 
@@ -66,10 +66,6 @@ class SocketService {
           detail: { message: errorMessage, originalError: errorData },
         }),
       );
-    });
-
-    this.socket.on("connect", () => {
-      this.eventHandlers.forEach((handler, event) => {});
     });
 
     return this.socket;
@@ -102,26 +98,38 @@ class SocketService {
     return this.doAuthenticate(token);
   }
 
+  // FIXED: Use named handlers and proper cleanup
   doAuthenticate(token) {
     this.socket.emit("authenticate", token);
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        // Clean up listeners on timeout
+        this.socket.off("authenticated", onAuthenticated);
+        this.socket.off("error", onAuthError);
         reject(new Error("Authentication timeout"));
       }, 5000);
 
-      this.socket.once("authenticated", (data) => {
+      const onAuthenticated = (data) => {
         clearTimeout(timeout);
+        this.socket.off("error", onAuthError);
         this.authenticated = true;
-
+        console.log("✅ Authentication successful:", data);
         resolve(data);
-      });
+      };
 
-      this.socket.once("error", (error) => {
+      const onAuthError = (error) => {
         clearTimeout(timeout);
+        this.socket.off("authenticated", onAuthenticated);
         console.error("❌ Authentication failed:", error);
         reject(error);
-      });
+      };
+
+      // CRITICAL: Use 'once' to prevent listener leaks
+      this.socket.once("authenticated", onAuthenticated);
+      
+      // CRITICAL: Use named handler so we can remove it properly
+      this.socket.once("error", onAuthError);
     });
   }
 
@@ -156,7 +164,7 @@ class SocketService {
   }
 
   emit(event, data) {
-    console.log(" Event :: ", data);
+    console.log("📤 Event :: ", data);
 
     if (!this.socket?.connected) {
       console.error("❌ Cannot emit, socket not connected");
@@ -168,29 +176,18 @@ class SocketService {
 
   // ==================== MATCHMAKING ====================
 
-  /**
-   * Join matchmaking queue with optional year filter
-   * @param {Object} criteria - Matchmaking criteria
-   * @param {number} criteria.ratingMin - Minimum problem rating (800-3500)
-   * @param {number} criteria.ratingMax - Maximum problem rating (800-3500)
-   * @param {number} criteria.duration - Match duration in minutes (1-180)
-   * @param {string[]} criteria.tags - Problem tags (optional)
-   * @param {number} criteria.minYear - Minimum problem year (optional, e.g. 2024)
-   */
   joinMatchmaking(criteria) {
-    // Validate criteria before sending
     if (!criteria.ratingMin || !criteria.ratingMax || !criteria.duration) {
       console.error("❌ Invalid matchmaking criteria:", criteria);
       throw new Error("Missing required matchmaking criteria");
     }
 
-    // Ensure minYear is either null or a valid number
     const validCriteria = {
       ratingMin: criteria.ratingMin,
       ratingMax: criteria.ratingMax,
       duration: criteria.duration,
       tags: criteria.tags || [],
-      minYear: criteria.minYear || null, // Support year filter
+      minYear: criteria.minYear || null,
     };
 
     this.emit("join-matchmaking", validCriteria);
@@ -202,20 +199,11 @@ class SocketService {
 
   // ==================== DUEL ====================
 
-  /**
-   * Create a duel with optional year filter
-   * @param {Object} settings - Duel settings
-   * @param {number} settings.ratingMin - Minimum problem rating
-   * @param {number} settings.ratingMax - Maximum problem rating
-   * @param {number} settings.duration - Match duration in minutes
-   * @param {string[]} settings.tags - Problem tags (optional)
-   * @param {number} settings.minYear - Minimum problem year (optional)
-   */
   createDuel(settings) {
     const validSettings = {
       ...settings,
       tags: settings.tags || [],
-      minYear: settings.minYear || null, // Support year filter
+      minYear: settings.minYear || null,
     };
 
     this.emit("create-duel", validSettings);
@@ -243,7 +231,7 @@ class SocketService {
     this.emit("reject-draw", { matchId });
   }
 
-  // ==================== CHAT METHODS ====================
+  // ==================== CHAT METHODS (MATCH) ====================
 
   getMatchMessages(matchId) {
     this.emit("get-match-messages", { matchId });
@@ -255,13 +243,11 @@ class SocketService {
 
   onNewMessage(matchId, handler) {
     const event = `new-message-${matchId}`;
-
     this.on(event, handler);
   }
 
   offNewMessage(matchId, handler) {
     const event = `new-message-${matchId}`;
-
     this.off(event, handler);
   }
 
@@ -271,6 +257,60 @@ class SocketService {
 
   offMessagesLoaded(handler) {
     this.off("match-messages-loaded", handler);
+  }
+
+  // ==================== GLOBAL CHAT METHODS ====================
+
+  loadGlobalMessages(offset = 0) {
+    console.log("📥 Requesting global messages with offset:", offset);
+    this.emit("load-global-messages", { offset });
+  }
+
+  broadcastMessage(content) {
+    if (!content || content.trim().length === 0) {
+      console.error("❌ Cannot send empty message");
+      return;
+    }
+
+    if (content.length > 500) {
+      console.error("❌ Message too long (max 500 characters)");
+      return;
+    }
+
+    console.log("📤 Broadcasting message:", content);
+    this.emit("broadcast", content.trim());
+  }
+
+  onGlobalMessagesLoaded(handler) {
+    this.on("global-messages-loaded", handler);
+  }
+
+  offGlobalMessagesLoaded(handler) {
+    this.off("global-messages-loaded", handler);
+  }
+
+  onGlobalMessage(handler) {
+    this.on("global-message", handler);
+  }
+
+  offGlobalMessage(handler) {
+    this.off("global-message", handler);
+  }
+
+  onOnlineUsersCount(handler) {
+    this.on("online-users-count", handler);
+  }
+
+  offOnlineUsersCount(handler) {
+    this.off("online-users-count", handler);
+  }
+
+  onRateLimitExceeded(handler) {
+    this.on("rate-limit-exceeded", handler);
+  }
+
+  offRateLimitExceeded(handler) {
+    this.off("rate-limit-exceeded", handler);
   }
 
   // ==================== UTILITY METHODS ====================
@@ -287,11 +327,6 @@ class SocketService {
     return this.authenticated;
   }
 
-  /**
-   * Wait for socket connection
-   * @param {number} timeout - Timeout in milliseconds (default: 5000)
-   * @returns {Promise<boolean>}
-   */
   waitForConnection(timeout = 5000) {
     return new Promise((resolve, reject) => {
       if (this.socket?.connected) {

@@ -26,6 +26,12 @@ const activePolls = new Map();
 // Store draw offers: matchId -> Set of userIds who offered draw
 const drawOffers = new Map();
 
+// NEW: Online users tracking
+const onlineUsers = new Set();
+
+// NEW: Rate limiter for global messages - userId -> [timestamps]
+const messageRateLimiter = new Map();
+
 // Helper function to determine problem tags based on user selections
 const determineProblemTags = (tags1, tags2) => {
   const hasTags1 = tags1 && tags1.length > 0;
@@ -124,18 +130,58 @@ const cancelExistingMatch = async (io, userId) => {
   return false;
 };
 
+// NEW: Rate limiter helper function
+const checkRateLimit = (userId) => {
+  const limit = parseInt(process.env.GLOBAL_MESSAGE_RATE_LIMIT || "15");
+  const now = Date.now();
+  const userMessages = messageRateLimiter.get(userId) || [];
+
+  // Filter messages from last minute (60000ms)
+  const recentMessages = userMessages.filter(
+    (timestamp) => now - timestamp < 60000,
+  );
+
+  if (recentMessages.length >= limit) {
+    // Calculate seconds until oldest message expires
+    const oldestTimestamp = Math.min(...recentMessages);
+    const secondsUntilReset = Math.ceil((60000 - (now - oldestTimestamp)) / 1000);
+    return { allowed: false, secondsUntilReset };
+  }
+
+  // Add current timestamp
+  recentMessages.push(now);
+  messageRateLimiter.set(userId, recentMessages);
+
+  return { allowed: true };
+};
+
+// NEW: Cleanup rate limiter periodically (every 2 minutes)
+const cleanupRateLimiter = () => {
+  const now = Date.now();
+  for (const [userId, timestamps] of messageRateLimiter.entries()) {
+    const recentMessages = timestamps.filter(
+      (timestamp) => now - timestamp < 60000,
+    );
+    if (recentMessages.length === 0) {
+      messageRateLimiter.delete(userId);
+    } else {
+      messageRateLimiter.set(userId, recentMessages);
+    }
+  }
+};
+
 const initializeSocket = (io) => {
   // Start checking for expired team battles
   startExpiredBattlesCheck(io);
 
   io.on("connection", (socket) => {
+    console.log("🔌 New socket connection:", socket.id);
 
     socket.on("authenticate", async (token) => {
-
       try {
         const decoded = verifyToken(token);
 
-        console.log(" Decoded :: ", decoded);
+        console.log("✅ Decoded :: ", decoded);
         if (!decoded) {
           socket.emit("error", { message: "Invalid token" });
           return;
@@ -144,6 +190,11 @@ const initializeSocket = (io) => {
 
         // CRITICAL: Join user's personal room for targeted events
         socket.join(`user-${decoded.userId}`);
+
+        // NEW: Track online users
+        onlineUsers.add(decoded.userId);
+        io.emit("online-users-count", onlineUsers.size);
+        console.log(`👤 User ${decoded.userId} online. Total: ${onlineUsers.size}`);
 
         socket.emit("authenticated", { userId: decoded.userId });
 
@@ -214,6 +265,89 @@ const initializeSocket = (io) => {
         socket.emit("error", { message: "Authentication failed" });
       }
     });
+
+    // ==================== GLOBAL CHAT EVENTS ====================
+
+    // NEW: Load global messages (initial load or pagination)
+    socket.on("load-global-messages", async (data) => {
+      try {
+        if (!socket.userId) {
+          socket.emit("error", { message: "Not authenticated" });
+          return;
+        }
+
+        const pageSize = parseInt(process.env.GLOBAL_MESSAGE_PAGE_SIZE || "50");
+        const { offset = 0 } = data || {};
+
+        console.log(`📥 Loading global messages - offset: ${offset}, limit: ${pageSize}`);
+
+        const [messages, totalCount] = await Promise.all([
+          messageService.getGlobalMessages(pageSize, offset),
+          messageService.getGlobalMessageCount(),
+        ]);
+
+        const hasMore = offset + messages.length < totalCount;
+
+        socket.emit("global-messages-loaded", {
+          messages,
+          hasMore,
+          totalCount,
+          offset,
+        });
+
+        console.log(`✅ Sent ${messages.length} messages. HasMore: ${hasMore}`);
+      } catch (error) {
+        console.error("❌ Load global messages error:", error);
+        socket.emit("error", { message: "Failed to load messages" });
+      }
+    });
+
+    // UPDATED: Broadcast with rate limiting
+    socket.on("broadcast", async (content) => {
+      try {
+        if (!socket.userId) {
+          socket.emit("error", { message: "Not authenticated" });
+          return;
+        }
+
+        if (!content || content.trim().length === 0) {
+          socket.emit("error", { message: "Message cannot be empty" });
+          return;
+        }
+
+        if (content.length > 500) {
+          socket.emit("error", {
+            message: "Message too long (max 500 characters)",
+          });
+          return;
+        }
+
+        // NEW: Check rate limit
+        const rateLimitCheck = checkRateLimit(socket.userId);
+        if (!rateLimitCheck.allowed) {
+          socket.emit("rate-limit-exceeded", {
+            message: `Too many messages. Please wait ${rateLimitCheck.secondsUntilReset} seconds.`,
+            secondsUntilReset: rateLimitCheck.secondsUntilReset,
+          });
+          console.log(`⚠️ Rate limit exceeded for user ${socket.userId}`);
+          return;
+        }
+
+        const message = await messageService.createGlobalMessage(
+          socket.userId,
+          content.trim(),
+        );
+
+        // Broadcast to ALL connected clients
+        io.emit("global-message", { message });
+        console.log(`📤 Global message sent by ${message.senderName}`);
+      } catch (error) {
+        console.error("❌ Broadcast error:", error);
+        socket.emit("error", { message: "Failed to send message" });
+      }
+    });
+
+    // ==================== MATCHMAKING EVENTS ====================
 
     socket.on("join-matchmaking", async (data) => {
       try {
@@ -803,7 +937,7 @@ const initializeSocket = (io) => {
           return;
         }
 
-        ("✅ Player accepted draw:", socket.userId, "Match:", matchId);
+        console.log("✅ Player accepted draw:", socket.userId, "Match:", matchId);
 
         // Stop polling
         stopPolling(matchId);
@@ -849,37 +983,6 @@ const initializeSocket = (io) => {
       } catch (error) {
         console.error("Get match messages error:", error);
         socket.emit("error", { message: "Failed to load messages" });
-      }
-    });
-
-    // Broadcast for global mesages
-    socket.on("broadcast", async (content) => {
-      try {
-        if (!socket.userId) {
-          socket.emit("error", { message: "Not authenticated" });
-          return;
-        }
-
-        if (!content || content.trim().length === 0) {
-          socket.emit("error", { message: "Message cannot be empty" });
-          return;
-        }
-
-        if (content.length > 500) {
-          socket.emit("error", {
-            message: "Message too long (max 500 characters)",
-          });
-          return;
-        }
-
-        const message = await messageService.createGlobalMessage(
-          socket.userId,
-          content.trim(),
-        );
-
-        io.emit("global-message", { message });
-      } catch (error) {
-        console.error("Broadcast error:", error);
       }
     });
 
@@ -956,6 +1059,11 @@ const initializeSocket = (io) => {
     socket.on("disconnect", async () => {
       if (socket.userId) {
         await matchmakingService.removeFromQueue(socket.userId);
+
+        // NEW: Remove from online users
+        onlineUsers.delete(socket.userId);
+        io.emit("online-users-count", onlineUsers.size);
+        console.log(`👋 User ${socket.userId} offline. Total: ${onlineUsers.size}`);
       }
     });
   });
@@ -1001,16 +1109,40 @@ const initializeSocket = (io) => {
     }
   }, 30000); // Every 30 seconds
 
-  // Cleanup old messages daily
+  // Cleanup old match messages daily
   setInterval(
     async () => {
       try {
         await messageService.cleanupOldMessages();
       } catch (error) {
-        console.error("Error during message cleanup:", error);
+        console.error("Error during match message cleanup:", error);
       }
     },
     24 * 60 * 60 * 1000,
+  );
+
+  // NEW: Cleanup old global messages daily
+  setInterval(
+    async () => {
+      try {
+        await messageService.cleanupOldGlobalMessages();
+      } catch (error) {
+        console.error("Error during global message cleanup:", error);
+      }
+    },
+    24 * 60 * 60 * 1000,
+  );
+
+  // NEW: Cleanup rate limiter every 2 minutes
+  setInterval(
+    () => {
+      try {
+        cleanupRateLimiter();
+      } catch (error) {
+        console.error("Error during rate limiter cleanup:", error);
+      }
+    },
+    2 * 60 * 1000,
   );
 };
 

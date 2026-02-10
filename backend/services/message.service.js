@@ -33,7 +33,6 @@ class MessageService {
     }
   }
 
-
   async createGlobalMessage(senderId, content) {
     try {
       if (!senderId) throw new Error("senderId is required");
@@ -52,8 +51,8 @@ class MessageService {
       const message = await prisma.globalMessage.create({
         data: {
           content: content.trim(),
-          senderId: user.id,           // use FK
-          senderName: user.username,   // de-normalized
+          senderId: user.id, // use FK
+          senderName: user.username, // de-normalized
         },
       });
 
@@ -64,6 +63,40 @@ class MessageService {
     }
   }
 
+  // NEW: Get paginated global messages (newest first)
+  async getGlobalMessages(limit = 50, offset = 0) {
+    try {
+      const messages = await prisma.globalMessage.findMany({
+        orderBy: { createdAt: "desc" }, // Newest first
+        take: limit,
+        skip: offset,
+        select: {
+          id: true,
+          content: true,
+          senderId: true,
+          senderName: true,
+          createdAt: true,
+        },
+      });
+
+      // Reverse to show oldest first in UI (chronological order)
+      return messages.reverse();
+    } catch (error) {
+      console.error("❌ Error fetching global messages:", error);
+      throw new Error(`Failed to fetch global messages: ${error.message}`);
+    }
+  }
+
+  // NEW: Get total count of global messages
+  async getGlobalMessageCount() {
+    try {
+      const count = await prisma.globalMessage.count();
+      return count;
+    } catch (error) {
+      console.error("❌ Error counting global messages:", error);
+      return 0;
+    }
+  }
 
   async getMatchMessages(matchId) {
     try {
@@ -93,9 +126,10 @@ class MessageService {
     }
   }
 
+  // UPDATED: Cleanup old match messages (24 hours)
   async cleanupOldMessages() {
     try {
-      // Delete messages older than 24 hours from completed matches
+      // Delete match messages older than 24 hours
       const oneDayAgo = new Date();
       oneDayAgo.setDate(oneDayAgo.getDate() - 1);
 
@@ -107,8 +141,38 @@ class MessageService {
         },
       });
 
+      console.log(`🧹 Cleaned up ${result.count} old match messages`);
       return result.count;
     } catch (error) {
+      console.error("❌ Error cleaning up old match messages:", error);
+      return 0;
+    }
+  }
+
+  // NEW: Cleanup old global messages based on retention period
+  async cleanupOldGlobalMessages() {
+    try {
+      const retentionDays = parseInt(
+        process.env.GLOBAL_MESSAGE_RETENTION_DAYS || "30",
+      );
+
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+
+      const result = await prisma.globalMessage.deleteMany({
+        where: {
+          createdAt: {
+            lt: cutoffDate,
+          },
+        },
+      });
+
+      console.log(
+        `🧹 Cleaned up ${result.count} global messages older than ${retentionDays} days`,
+      );
+      return result.count;
+    } catch (error) {
+      console.error("❌ Error cleaning up old global messages:", error);
       return 0;
     }
   }

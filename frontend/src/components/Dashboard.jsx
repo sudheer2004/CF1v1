@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Target, TrendingUp, Users, Swords, Clock } from 'lucide-react';
+import { Trophy, Target, TrendingUp, Users, Swords, Clock, MessageCircle } from 'lucide-react';
 import { getRatingColor, getRatingBadge } from '../utils/constants';
 
 export default function Dashboard({ user, setView }) {
@@ -64,10 +64,10 @@ export default function Dashboard({ user, setView }) {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className="grid md:grid-cols-3 gap-6">
         <button
           onClick={() => setView('matchmaking')}
-          className="group bg-gradient-to-br from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 rounded-lg p-8 text-left transition transform hover:scale-105"
+          className="group bg-gradient-to-br from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 rounded-2xl p-8 text-left transition-all duration-200 transform hover:scale-105 hover:shadow-xl hover:shadow-purple-600/20"
         >
           <Users className="w-12 h-12 text-white mb-4" />
           <h3 className="text-2xl font-bold text-white mb-2">Quick Match</h3>
@@ -78,12 +78,24 @@ export default function Dashboard({ user, setView }) {
 
         <button
           onClick={() => setView('duel')}
-          className="group bg-gradient-to-br from-pink-600 to-red-600 hover:from-pink-700 hover:to-red-700 rounded-lg p-8 text-left transition transform hover:scale-105"
+          className="group bg-gradient-to-br from-pink-600 to-red-600 hover:from-pink-700 hover:to-red-700 rounded-2xl p-8 text-left transition-all duration-200 transform hover:scale-105 hover:shadow-xl hover:shadow-pink-600/20"
         >
           <Swords className="w-12 h-12 text-white mb-4" />
           <h3 className="text-2xl font-bold text-white mb-2">Challenge Friend</h3>
           <p className="text-pink-100">
             Create a custom duel and invite your friends to compete
+          </p>
+        </button>
+
+        {/* Updated: Global Chat Quick Access */}
+        <button
+          onClick={() => setView('global-chat')}
+          className="group bg-gradient-to-br from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 rounded-2xl p-8 text-left transition-all duration-200 transform hover:scale-105 hover:shadow-xl hover:shadow-green-600/20"
+        >
+          <MessageCircle className="w-12 h-12 text-white mb-4" />
+          <h3 className="text-2xl font-bold text-white mb-2">Global Chat</h3>
+          <p className="text-green-100">
+            Chat with other players and make new friends
           </p>
         </button>
       </div>
