@@ -26,10 +26,10 @@ const activePolls = new Map();
 // Store draw offers: matchId -> Set of userIds who offered draw
 const drawOffers = new Map();
 
-// NEW: Online users tracking
+// Online users tracking
 const onlineUsers = new Set();
 
-// NEW: Rate limiter for global messages - userId -> [timestamps]
+// Rate limiter for global messages - userId -> [timestamps]
 const messageRateLimiter = new Map();
 
 // Helper function to determine problem tags based on user selections
@@ -37,42 +37,19 @@ const determineProblemTags = (tags1, tags2) => {
   const hasTags1 = tags1 && tags1.length > 0;
   const hasTags2 = tags2 && tags2.length > 0;
 
-  if (!hasTags1 && !hasTags2) {
-    return [];
-  }
-
-  if (hasTags1 && !hasTags2) {
-    return tags1;
-  }
-  if (!hasTags1 && hasTags2) {
-    return tags2;
-  }
+  if (!hasTags1 && !hasTags2) return [];
+  if (hasTags1 && !hasTags2) return tags1;
+  if (!hasTags1 && hasTags2) return tags2;
 
   const commonTags = tags1.filter((tag) => tags2.includes(tag));
-
-  if (commonTags.length > 0) {
-    return commonTags;
-  }
-
-  return [];
+  return commonTags.length > 0 ? commonTags : [];
 };
 
 // Helper function to determine final minYear from two players
 const determineFinalMinYear = (minYear1, minYear2) => {
-  // If neither player specified a year, return null
-  if (!minYear1 && !minYear2) {
-    return null;
-  }
-
-  // If only one player specified a year, use that
-  if (minYear1 && !minYear2) {
-    return minYear1;
-  }
-  if (!minYear1 && minYear2) {
-    return minYear2;
-  }
-
-  // If both specified years, use the more restrictive (higher) value
+  if (!minYear1 && !minYear2) return null;
+  if (minYear1 && !minYear2) return minYear1;
+  if (!minYear1 && minYear2) return minYear2;
   return Math.max(minYear1, minYear2);
 };
 
@@ -82,8 +59,6 @@ const stopPolling = (matchId) => {
     clearInterval(activePolls.get(matchId));
     activePolls.delete(matchId);
   }
-
-  // Clean up draw offers
   if (drawOffers.has(matchId)) {
     drawOffers.delete(matchId);
   }
@@ -105,10 +80,8 @@ const cancelExistingMatch = async (io, userId) => {
   const existingMatch = await checkActiveMatch(userId);
 
   if (existingMatch) {
-    // Stop polling
     stopPolling(existingMatch.id);
 
-    // Fetch full match details
     const fullMatch = await prisma.match.findUnique({
       where: { id: existingMatch.id },
       include: {
@@ -121,41 +94,37 @@ const cancelExistingMatch = async (io, userId) => {
       },
     });
 
-    // End as draw (no rating change for abandoned match)
     await handleMatchEnd(io, fullMatch, null);
-
     return true;
   }
 
   return false;
 };
 
-// NEW: Rate limiter helper function
+// Rate limiter helper
 const checkRateLimit = (userId) => {
   const limit = parseInt(process.env.GLOBAL_MESSAGE_RATE_LIMIT || "15");
   const now = Date.now();
   const userMessages = messageRateLimiter.get(userId) || [];
 
-  // Filter messages from last minute (60000ms)
   const recentMessages = userMessages.filter(
     (timestamp) => now - timestamp < 60000,
   );
 
   if (recentMessages.length >= limit) {
-    // Calculate seconds until oldest message expires
     const oldestTimestamp = Math.min(...recentMessages);
-    const secondsUntilReset = Math.ceil((60000 - (now - oldestTimestamp)) / 1000);
+    const secondsUntilReset = Math.ceil(
+      (60000 - (now - oldestTimestamp)) / 1000,
+    );
     return { allowed: false, secondsUntilReset };
   }
 
-  // Add current timestamp
   recentMessages.push(now);
   messageRateLimiter.set(userId, recentMessages);
-
   return { allowed: true };
 };
 
-// NEW: Cleanup rate limiter periodically (every 2 minutes)
+// Cleanup rate limiter periodically
 const cleanupRateLimiter = () => {
   const now = Date.now();
   for (const [userId, timestamps] of messageRateLimiter.entries()) {
@@ -171,30 +140,31 @@ const cleanupRateLimiter = () => {
 };
 
 const initializeSocket = (io) => {
-  // Start checking for expired team battles
   startExpiredBattlesCheck(io);
 
   io.on("connection", (socket) => {
     console.log("🔌 New socket connection:", socket.id);
 
+    // ==================== AUTHENTICATION ====================
+
     socket.on("authenticate", async (token) => {
       try {
         const decoded = verifyToken(token);
 
-        console.log("✅ Decoded :: ", decoded);
         if (!decoded) {
           socket.emit("error", { message: "Invalid token" });
           return;
         }
-        socket.userId = decoded.userId;
 
-        // CRITICAL: Join user's personal room for targeted events
+        socket.userId = decoded.userId;
         socket.join(`user-${decoded.userId}`);
 
-        // NEW: Track online users
+        // Track online users
         onlineUsers.add(decoded.userId);
         io.emit("online-users-count", onlineUsers.size);
-        console.log(`👤 User ${decoded.userId} online. Total: ${onlineUsers.size}`);
+        console.log(
+          `👤 User ${decoded.userId} online. Total: ${onlineUsers.size}`,
+        );
 
         socket.emit("authenticated", { userId: decoded.userId });
 
@@ -205,13 +175,9 @@ const initializeSocket = (io) => {
           if (activeMatch && activeMatch.status === "active") {
             const isExpired = matchService.isMatchExpired(activeMatch);
 
-            // Check if match is expired
             if (isExpired) {
               await handleMatchEnd(io, activeMatch, null);
             } else {
-              // Resume polling for this match
-
-              // Fetch full match data with player details
               const fullMatch = await prisma.match.findUnique({
                 where: { id: activeMatch.id },
                 include: {
@@ -268,41 +234,7 @@ const initializeSocket = (io) => {
 
     // ==================== GLOBAL CHAT EVENTS ====================
 
-    // NEW: Load global messages (initial load or pagination)
-    socket.on("load-global-messages", async (data) => {
-      try {
-        if (!socket.userId) {
-          socket.emit("error", { message: "Not authenticated" });
-          return;
-        }
-
-        const pageSize = parseInt(process.env.GLOBAL_MESSAGE_PAGE_SIZE || "50");
-        const { offset = 0 } = data || {};
-
-        console.log(`📥 Loading global messages - offset: ${offset}, limit: ${pageSize}`);
-
-        const [messages, totalCount] = await Promise.all([
-          messageService.getGlobalMessages(pageSize, offset),
-          messageService.getGlobalMessageCount(),
-        ]);
-
-        const hasMore = offset + messages.length < totalCount;
-
-        socket.emit("global-messages-loaded", {
-          messages,
-          hasMore,
-          totalCount,
-          offset,
-        });
-
-        console.log(`✅ Sent ${messages.length} messages. HasMore: ${hasMore}`);
-      } catch (error) {
-        console.error("❌ Load global messages error:", error);
-        socket.emit("error", { message: "Failed to load messages" });
-      }
-    });
-
-    // UPDATED: Broadcast with rate limiting
+    // Send new global message with rate limiting
     socket.on("broadcast", async (content) => {
       try {
         if (!socket.userId) {
@@ -322,7 +254,6 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // NEW: Check rate limit
         const rateLimitCheck = checkRateLimit(socket.userId);
         if (!rateLimitCheck.allowed) {
           socket.emit("rate-limit-exceeded", {
@@ -338,13 +269,54 @@ const initializeSocket = (io) => {
           content.trim(),
         );
 
-        // Broadcast to ALL connected clients
         io.emit("global-message", { message });
         console.log(`📤 Global message sent by ${message.senderName}`);
       } catch (error) {
         console.error("❌ Broadcast error:", error);
         socket.emit("error", { message: "Failed to send message" });
       }
+    });
+
+    // FIX: Relay edit to all clients — REST already saved to DB, no second DB call
+    socket.on("broadcast-message-edit", ({ messageId, content }) => {
+      if (!socket.userId) {
+        socket.emit("error", { message: "Not authenticated" });
+        return;
+      }
+
+      if (!messageId || !content?.trim()) {
+        socket.emit("error", { message: "messageId and content are required" });
+        return;
+      }
+
+      io.emit("global-message-edited", {
+        message: { id: messageId, content: content.trim(), isEdited: true },
+      });
+
+      console.log(
+        `✏️ Message ${messageId} edit broadcast by user ${socket.userId}`,
+      );
+    });
+
+    // FIX: Relay delete to all clients — REST already deleted from DB, no second DB call
+    socket.on("broadcast-message-delete", ({ messageId }) => {
+      if (!socket.userId) {
+        socket.emit("error", { message: "Not authenticated" });
+        return;
+      }
+
+      if (!messageId) {
+        socket.emit("error", { message: "messageId is required" });
+        return;
+      }
+
+      io.emit("global-message-deleted", {
+        message: { id: messageId, isDeleted: true },
+      });
+
+      console.log(
+        `🗑️ Message ${messageId} delete broadcast by user ${socket.userId}`,
+      );
     });
 
     // ==================== MATCHMAKING EVENTS ====================
@@ -356,7 +328,6 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // CHECK: User already has active match
         const existingMatch = await checkActiveMatch(socket.userId);
         if (existingMatch) {
           socket.emit("error", {
@@ -368,7 +339,6 @@ const initializeSocket = (io) => {
 
         const { ratingMin, ratingMax, tags, duration, minYear } = data;
 
-        // Validation
         if (
           ratingMin === undefined ||
           ratingMax === undefined ||
@@ -391,7 +361,6 @@ const initializeSocket = (io) => {
         const match = await matchmakingService.findMatch(queueEntry);
 
         if (match) {
-          // Double-check both users don't have active matches
           const user1ActiveMatch = await checkActiveMatch(socket.userId);
           const user2ActiveMatch = await checkActiveMatch(match.userId);
 
@@ -412,7 +381,6 @@ const initializeSocket = (io) => {
           const problemTags = determineProblemTags(queueEntry.tags, match.tags);
           const finalMinYear = determineFinalMinYear(minYear, match.minYear);
 
-          // NEW: Emit "preparing match" event to both users
           io.to(`user-${socket.userId}`).emit("match-preparing", {
             message: "Opponent found! Selecting problem...",
           });
@@ -421,7 +389,6 @@ const initializeSocket = (io) => {
           });
 
           try {
-            // NEW: Get both users' CF handles
             const player1 = await userService.findUserById(socket.userId);
             const player2 = await userService.findUserById(match.userId);
 
@@ -429,17 +396,20 @@ const initializeSocket = (io) => {
               throw new Error("Missing Codeforces handles");
             }
 
-            // NEW: Use unsolved problem selection (2 API calls here)
-            const problem = await codeforcesService.selectRandomUnsolvedProblem(
-              overlapMin,
-              overlapMax,
-              problemTags,
-              finalMinYear,
-              player1.cfHandle,
-              player2.cfHandle,
-            );
+            const problem =
+              await codeforcesService.selectRandomUnsolvedProblem(
+                overlapMin,
+                overlapMax,
+                problemTags,
+                finalMinYear,
+                player1.cfHandle,
+                player2.cfHandle,
+              );
 
-            const matchDuration = Math.max(queueEntry.duration, match.duration);
+            const matchDuration = Math.max(
+              queueEntry.duration,
+              match.duration,
+            );
 
             const createdMatch = await matchService.createMatch(
               socket.userId,
@@ -448,7 +418,6 @@ const initializeSocket = (io) => {
               matchDuration,
             );
 
-            // Fetch full match with player details
             const fullMatch = await prisma.match.findUnique({
               where: { id: createdMatch.id },
               include: {
@@ -476,7 +445,6 @@ const initializeSocket = (io) => {
               problem.index,
             );
 
-            // Emit match found to both users
             io.to(`user-${socket.userId}`).emit("match-found", {
               match: createdMatch,
               problemUrl,
@@ -489,12 +457,10 @@ const initializeSocket = (io) => {
               opponent: queueEntry.user,
             });
 
-            // Start polling
             startSubmissionPolling(io, fullMatch);
           } catch (problemError) {
             console.error("Problem selection failed:", problemError);
 
-            // Notify both users
             io.to(`user-${socket.userId}`).emit("error", {
               message: "Failed to find suitable problem. Please try again.",
             });
@@ -507,9 +473,7 @@ const initializeSocket = (io) => {
         console.error("Join matchmaking error:", error);
 
         if (error.details && Array.isArray(error.details)) {
-          socket.emit("error", {
-            message: error.details.join(", "),
-          });
+          socket.emit("error", { message: error.details.join(", ") });
         } else {
           socket.emit("error", {
             message: error.message || "Failed to join matchmaking",
@@ -521,13 +485,14 @@ const initializeSocket = (io) => {
     socket.on("leave-matchmaking", async () => {
       try {
         if (!socket.userId) return;
-
         await matchmakingService.removeFromQueue(socket.userId);
         socket.emit("queue-left");
       } catch (error) {
         console.error("Leave matchmaking error:", error);
       }
     });
+
+    // ==================== DUEL EVENTS ====================
 
     socket.on("create-duel", async (data) => {
       try {
@@ -536,7 +501,6 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // CHECK: User already has active match
         const existingMatch = await checkActiveMatch(socket.userId);
         if (existingMatch) {
           socket.emit("error", {
@@ -546,10 +510,8 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // UPDATED: Extract minYear from request
         const { ratingMin, ratingMax, tags, duration, minYear } = data;
 
-        // ADD VALIDATION CHECK
         if (
           ratingMin === undefined ||
           ratingMax === undefined ||
@@ -559,26 +521,22 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // UPDATED: Pass minYear to duel creation
         const duel = await duelService.createDuel(
           socket.userId,
           ratingMin,
           ratingMax,
           tags || [],
           duration,
-          minYear || null, // NEW PARAMETER
+          minYear || null,
         );
 
         socket.join(`duel-${duel.duelCode}`);
-
         socket.emit("duel-created", { duel });
       } catch (error) {
         console.error("Create duel error:", error);
 
         if (error.details && Array.isArray(error.details)) {
-          socket.emit("error", {
-            message: error.details.join(", "),
-          });
+          socket.emit("error", { message: error.details.join(", ") });
         } else {
           socket.emit("error", {
             message: error.message || "Failed to create duel",
@@ -594,7 +552,6 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // CHECK: User already has active match
         const existingMatch = await checkActiveMatch(socket.userId);
         if (existingMatch) {
           socket.emit("error", {
@@ -606,7 +563,6 @@ const initializeSocket = (io) => {
 
         const duel = await duelService.joinDuel(duelCode, socket.userId);
 
-        // Check if duel creator has active match
         const creatorActiveMatch = await checkActiveMatch(duel.creatorId);
         if (creatorActiveMatch) {
           socket.emit("error", {
@@ -617,7 +573,6 @@ const initializeSocket = (io) => {
 
         socket.join(`duel-${duelCode}`);
 
-        // NEW: Emit "preparing match" event
         io.to(`user-${socket.userId}`).emit("match-preparing", {
           message: "Selecting problem...",
         });
@@ -626,7 +581,6 @@ const initializeSocket = (io) => {
         });
 
         try {
-          // NEW: Get both users' CF handles
           const creator = await userService.findUserById(duel.creatorId);
           const joiner = await userService.findUserById(socket.userId);
 
@@ -634,7 +588,6 @@ const initializeSocket = (io) => {
             throw new Error("Missing Codeforces handles");
           }
 
-          // NEW: Use unsolved problem selection
           const problem = await codeforcesService.selectRandomUnsolvedProblem(
             duel.ratingMin,
             duel.ratingMax,
@@ -658,7 +611,6 @@ const initializeSocket = (io) => {
             duel.duration,
           );
 
-          // Fetch full match
           const fullMatch = await prisma.match.findUnique({
             where: { id: createdMatch.id },
             include: {
@@ -683,7 +635,6 @@ const initializeSocket = (io) => {
 
           const problemUrl = getCodeforcesUrl(problem.contestId, problem.index);
 
-          // Emit match found
           io.to(`user-${duel.creatorId}`).emit("match-found", {
             match: createdMatch,
             problemUrl,
@@ -706,7 +657,6 @@ const initializeSocket = (io) => {
             },
           });
 
-          // Start polling
           startSubmissionPolling(io, fullMatch);
         } catch (problemError) {
           console.error("Problem selection failed:", problemError);
@@ -726,7 +676,8 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Give Up - Player forfeits the match
+    // ==================== MATCH ACTION EVENTS ====================
+
     socket.on("give-up", async (data) => {
       try {
         if (!socket.userId) {
@@ -767,7 +718,6 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // Verify user is part of this match
         if (
           match.player1Id !== socket.userId &&
           match.player2Id !== socket.userId
@@ -776,14 +726,10 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // Determine winner (opponent)
         const winnerId =
           match.player1Id === socket.userId ? match.player2Id : match.player1Id;
 
-        // Stop polling
         stopPolling(matchId);
-
-        // End match
         await handleMatchEnd(io, match, winnerId);
       } catch (error) {
         console.error("Give up error:", error);
@@ -791,7 +737,6 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Offer Draw - Player offers a draw
     socket.on("offer-draw", async (data) => {
       try {
         if (!socket.userId) {
@@ -812,7 +757,6 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // Verify user is part of this match
         if (
           match.player1Id !== socket.userId &&
           match.player2Id !== socket.userId
@@ -821,7 +765,6 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // Initialize draw offers set for this match if not exists
         if (!drawOffers.has(matchId)) {
           drawOffers.set(matchId, new Set());
         }
@@ -829,19 +772,16 @@ const initializeSocket = (io) => {
         const offersSet = drawOffers.get(matchId);
         offersSet.add(socket.userId);
 
-        // Notify opponent
         const opponentId =
           match.player1Id === socket.userId ? match.player2Id : match.player1Id;
+
         io.to(`user-${opponentId}`).emit(`draw-offered-${matchId}`, {
           offeredBy: socket.userId,
         });
 
-        // Check if both players have offered draw
         if (offersSet.has(match.player1Id) && offersSet.has(match.player2Id)) {
-          // Stop polling
           stopPolling(matchId);
 
-          // Fetch full match
           const fullMatch = await prisma.match.findUnique({
             where: { id: matchId },
             include: {
@@ -864,7 +804,6 @@ const initializeSocket = (io) => {
             },
           });
 
-          // End match as draw
           await handleMatchEnd(io, fullMatch, null);
         }
       } catch (error) {
@@ -873,7 +812,6 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Accept Draw - Player accepts draw offer
     socket.on("accept-draw", async (data) => {
       try {
         if (!socket.userId) {
@@ -914,7 +852,6 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // Verify user is part of this match
         if (
           match.player1Id !== socket.userId &&
           match.player2Id !== socket.userId
@@ -929,20 +866,15 @@ const initializeSocket = (io) => {
           return;
         }
 
-        // Check if opponent has offered draw
         const opponentId =
           match.player1Id === socket.userId ? match.player2Id : match.player1Id;
+
         if (!offersSet.has(opponentId)) {
           socket.emit("error", { message: "Opponent has not offered draw" });
           return;
         }
 
-        console.log("✅ Player accepted draw:", socket.userId, "Match:", matchId);
-
-        // Stop polling
         stopPolling(matchId);
-
-        // End match as draw
         await handleMatchEnd(io, match, null);
       } catch (error) {
         console.error("Accept draw error:", error);
@@ -950,7 +882,64 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Get match messages
+    // FIX: reject-draw was completely missing — added handler
+    socket.on("reject-draw", async (data) => {
+      try {
+        if (!socket.userId) {
+          socket.emit("error", { message: "Not authenticated" });
+          return;
+        }
+
+        const { matchId } = data;
+        const match = await matchService.getMatchById(matchId);
+
+        if (!match) {
+          socket.emit("error", { message: "Match not found" });
+          return;
+        }
+
+        if (match.status !== "active") {
+          socket.emit("error", { message: "Match is not active" });
+          return;
+        }
+
+        if (
+          match.player1Id !== socket.userId &&
+          match.player2Id !== socket.userId
+        ) {
+          socket.emit("error", { message: "You are not part of this match" });
+          return;
+        }
+
+        // Remove the opponent's pending draw offer
+        const offersSet = drawOffers.get(matchId);
+        if (offersSet) {
+          const opponentId =
+            match.player1Id === socket.userId
+              ? match.player2Id
+              : match.player1Id;
+          offersSet.delete(opponentId);
+        }
+
+        // Notify the opponent their draw was rejected
+        const opponentId =
+          match.player1Id === socket.userId ? match.player2Id : match.player1Id;
+
+        io.to(`user-${opponentId}`).emit(`draw-rejected-${matchId}`, {
+          rejectedBy: socket.userId,
+        });
+
+        console.log(
+          `❌ Draw rejected for match ${matchId} by user ${socket.userId}`,
+        );
+      } catch (error) {
+        console.error("Reject draw error:", error);
+        socket.emit("error", { message: "Failed to reject draw" });
+      }
+    });
+
+    // ==================== MATCH CHAT EVENTS ====================
+
     socket.on("get-match-messages", async (data) => {
       try {
         if (!socket.userId) {
@@ -986,7 +975,6 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Send message
     socket.on("send-message", async (data) => {
       try {
         if (!socket.userId) {
@@ -1053,34 +1041,37 @@ const initializeSocket = (io) => {
       }
     });
 
-    // ===== TEAM BATTLE SOCKET HANDLERS =====
+    // ==================== TEAM BATTLE ====================
+
     initializeTeamBattleSocket(io, socket);
+
+    // ==================== DISCONNECT ====================
 
     socket.on("disconnect", async () => {
       if (socket.userId) {
         await matchmakingService.removeFromQueue(socket.userId);
 
-        // NEW: Remove from online users
         onlineUsers.delete(socket.userId);
         io.emit("online-users-count", onlineUsers.size);
-        console.log(`👋 User ${socket.userId} offline. Total: ${onlineUsers.size}`);
+        console.log(
+          `👋 User ${socket.userId} offline. Total: ${onlineUsers.size}`,
+        );
       }
     });
   });
 
-  // Cleanup stale queue entries
-  setInterval(
-    async () => {
-      try {
-        await matchmakingService.cleanStaleEntries();
-      } catch (error) {
-        console.error("Error cleaning stale entries:", error);
-      }
-    },
-    2 * 60 * 1000,
-  );
+  // ==================== INTERVALS ====================
 
-  // CRITICAL: Check for expired matches every 30 seconds
+  // Cleanup stale queue entries every 2 minutes
+  setInterval(async () => {
+    try {
+      await matchmakingService.cleanStaleEntries();
+    } catch (error) {
+      console.error("Error cleaning stale entries:", error);
+    }
+  }, 2 * 60 * 1000);
+
+  // Check for expired matches every 30 seconds
   setInterval(async () => {
     try {
       const activeMatches = await prisma.match.findMany({
@@ -1097,61 +1088,49 @@ const initializeSocket = (io) => {
 
       for (const match of activeMatches) {
         if (matchService.isMatchExpired(match)) {
-          // Stop polling if active
           stopPolling(match.id);
-
-          // End match as draw
           await handleMatchEnd(io, match, null);
         }
       }
     } catch (error) {
       console.error("Error checking expired matches:", error);
     }
-  }, 30000); // Every 30 seconds
+  }, 30000);
 
   // Cleanup old match messages daily
-  setInterval(
-    async () => {
-      try {
-        await messageService.cleanupOldMessages();
-      } catch (error) {
-        console.error("Error during match message cleanup:", error);
-      }
-    },
-    24 * 60 * 60 * 1000,
-  );
+  setInterval(async () => {
+    try {
+      await messageService.cleanupOldMessages();
+    } catch (error) {
+      console.error("Error during match message cleanup:", error);
+    }
+  }, 24 * 60 * 60 * 1000);
 
-  // NEW: Cleanup old global messages daily
-  setInterval(
-    async () => {
-      try {
-        await messageService.cleanupOldGlobalMessages();
-      } catch (error) {
-        console.error("Error during global message cleanup:", error);
-      }
-    },
-    24 * 60 * 60 * 1000,
-  );
+  // Cleanup old global messages daily
+  setInterval(async () => {
+    try {
+      await messageService.cleanupOldGlobalMessages();
+    } catch (error) {
+      console.error("Error during global message cleanup:", error);
+    }
+  }, 24 * 60 * 60 * 1000);
 
-  // NEW: Cleanup rate limiter every 2 minutes
-  setInterval(
-    () => {
-      try {
-        cleanupRateLimiter();
-      } catch (error) {
-        console.error("Error during rate limiter cleanup:", error);
-      }
-    },
-    2 * 60 * 1000,
-  );
+  // Cleanup rate limiter every 2 minutes
+  setInterval(() => {
+    try {
+      cleanupRateLimiter();
+    } catch (error) {
+      console.error("Error during rate limiter cleanup:", error);
+    }
+  }, 2 * 60 * 1000);
 };
 
-// Start polling submissions for a match
+// ==================== SUBMISSION POLLING ====================
+
 const startSubmissionPolling = (io, match) => {
   const pollInterval =
     parseInt(process.env.SUBMISSION_POLL_INTERVAL_SECONDS) || 10;
 
-  // Validate match data
   if (!match.player1?.cfHandle || !match.player2?.cfHandle) {
     console.error("❌ ERROR: Missing CF handles!");
     console.error(
@@ -1162,11 +1141,9 @@ const startSubmissionPolling = (io, match) => {
       "   Player 2 CF Handle:",
       match.player2?.cfHandle || "MISSING",
     );
-
     return;
   }
 
-  // Check if already polling this match
   if (activePolls.has(match.id)) {
     clearInterval(activePolls.get(match.id));
     activePolls.delete(match.id);
@@ -1196,9 +1173,7 @@ const startSubmissionPolling = (io, match) => {
         return;
       }
 
-      const isExpired = matchService.isMatchExpired(currentMatch);
-
-      if (isExpired) {
+      if (matchService.isMatchExpired(currentMatch)) {
         await handleMatchEnd(io, currentMatch, null);
         stopPolling(match.id);
         return;
@@ -1213,9 +1188,7 @@ const startSubmissionPolling = (io, match) => {
         results.player2?.attempts || 0,
       );
 
-      // Emit updates to clients
-      const updateEvent = `match-update-${match.id}`;
-      io.emit(updateEvent, {
+      io.emit(`match-update-${match.id}`, {
         player1Attempts: results.player1?.attempts || 0,
         player2Attempts: results.player2?.attempts || 0,
       });
@@ -1241,10 +1214,10 @@ const startSubmissionPolling = (io, match) => {
   activePolls.set(match.id, intervalId);
 };
 
-// Handle match end
+// ==================== MATCH END ====================
+
 const handleMatchEnd = async (io, match, winnerId) => {
   try {
-    // Ensure polling is stopped
     stopPolling(match.id);
 
     const ratingChanges = ratingService.calculateNewRatings(
@@ -1285,8 +1258,7 @@ const handleMatchEnd = async (io, match, winnerId) => {
       player2Result,
     );
 
-    const matchEndEvent = `match-end-${match.id}`;
-    io.emit(matchEndEvent, {
+    io.emit(`match-end-${match.id}`, {
       winnerId,
       player1RatingChange: ratingChanges.player1Change,
       player2RatingChange: ratingChanges.player2Change,

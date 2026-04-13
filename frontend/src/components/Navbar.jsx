@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Menu, X, Trophy, Swords, Users, LogOut, User, Award, Code, Flag } from 'lucide-react';
+import { Menu, X, Trophy, Swords, Users, LogOut, User, Award, Code, Flag, MessageCircle } from 'lucide-react';
 import { getRatingColor, getRatingBadge } from '../utils/constants';
 
-export default function Navbar({ user, view, setView, onLogout }) {
+export default function Navbar({ user, view, setView, onLogout, unreadMessages = 0 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = [
@@ -11,6 +11,7 @@ export default function Navbar({ user, view, setView, onLogout }) {
     { id: 'duel', label: 'Duel Mode', icon: Swords },
     { id: 'team-battle', label: 'Team Battle', icon: Users },
     { id: 'leaderboard', label: 'Leaderboard', icon: Award },
+    { id: 'global-chat', label: 'Global Chat', icon: MessageCircle, badge: unreadMessages },
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'report-issues', label: 'Report Issues', icon: Flag },
   ];
@@ -35,7 +36,7 @@ export default function Navbar({ user, view, setView, onLogout }) {
                 <button
                   key={item.id}
                   onClick={() => setView(item.id)}
-                  className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg transition text-sm ${
+                  className={`relative flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg transition text-sm ${
                     view === item.id
                       ? 'bg-purple-600 text-white'
                       : 'text-gray-300 hover:bg-gray-800'
@@ -43,6 +44,11 @@ export default function Navbar({ user, view, setView, onLogout }) {
                 >
                   <Icon className="w-3.5 h-3.5" />
                   <span>{item.label}</span>
+                  {item.badge > 0 && (
+                    <span className="ml-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                      {item.badge > 9 ? '9+' : item.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -95,6 +101,11 @@ export default function Navbar({ user, view, setView, onLogout }) {
                   >
                     <Icon className="w-5 h-5" />
                     <span>{item.label}</span>
+                    {item.badge > 0 && (
+                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
+                        {item.badge > 9 ? '9+' : item.badge}
+                      </span>
+                    )}
                   </button>
                 );
               })}

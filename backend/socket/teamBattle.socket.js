@@ -635,7 +635,7 @@ async function selectProblemsForBattle(battle) {
  */
 function startBattlePolling(io, battle) {
   const pollInterval = parseInt(process.env.SUBMISSION_POLL_INTERVAL_SECONDS) || 20;
-  const GRACE_PERIOD_SECONDS = 15;
+  const GRACE_PERIOD_SECONDS = 60;
 
   console.log(`🔄 Starting polling: ${battle.battleCode} (${battle.winningStrategy})`);
 

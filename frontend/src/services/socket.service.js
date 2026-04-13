@@ -127,7 +127,7 @@ class SocketService {
 
       // CRITICAL: Use 'once' to prevent listener leaks
       this.socket.once("authenticated", onAuthenticated);
-      
+
       // CRITICAL: Use named handler so we can remove it properly
       this.socket.once("error", onAuthError);
     });
@@ -261,9 +261,25 @@ class SocketService {
 
   // ==================== GLOBAL CHAT METHODS ====================
 
-  loadGlobalMessages(offset = 0) {
-    console.log("📥 Requesting global messages with offset:", offset);
-    this.emit("load-global-messages", { offset });
+  // UPDATED: Now uses REST API instead of WebSocket
+  async loadGlobalMessages(offset = 0) {
+    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+    const token = localStorage.getItem("token");
+
+    console.log("📥 Fetching global messages via REST API, offset:", offset);
+
+    const res = await fetch(`${apiUrl}/messages/global?offset=${offset}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error("Failed to load global messages");
+    }
+
+    const data = await res.json();
+    return data; // { messages, hasMore, totalCount, offset }
   }
 
   broadcastMessage(content) {
@@ -281,12 +297,46 @@ class SocketService {
     this.emit("broadcast", content.trim());
   }
 
-  onGlobalMessagesLoaded(handler) {
-    this.on("global-messages-loaded", handler);
+  // NEW: Edit own message via REST API (15 min window)
+  async editGlobalMessage(messageId, content) {
+    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+    const token = localStorage.getItem("token");
+
+    const res = await fetch(`${apiUrl}/messages/global/${messageId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ content }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Failed to edit message");
+    }
+
+    return await res.json(); // { message: updatedMessage }
   }
 
-  offGlobalMessagesLoaded(handler) {
-    this.off("global-messages-loaded", handler);
+  // NEW: Delete own message via REST API (anytime)
+  async deleteGlobalMessage(messageId) {
+    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+    const token = localStorage.getItem("token");
+
+    const res = await fetch(`${apiUrl}/messages/global/${messageId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Failed to delete message");
+    }
+
+    return await res.json(); // { success: true, id }
   }
 
   onGlobalMessage(handler) {
@@ -295,6 +345,23 @@ class SocketService {
 
   offGlobalMessage(handler) {
     this.off("global-message", handler);
+  }
+
+  // NEW: Real-time listeners for edits/deletes broadcast by server
+  onGlobalMessageEdited(handler) {
+    this.on("global-message-edited", handler);
+  }
+
+  offGlobalMessageEdited(handler) {
+    this.off("global-message-edited", handler);
+  }
+
+  onGlobalMessageDeleted(handler) {
+    this.on("global-message-deleted", handler);
+  }
+
+  offGlobalMessageDeleted(handler) {
+    this.off("global-message-deleted", handler);
   }
 
   onOnlineUsersCount(handler) {

@@ -13,9 +13,9 @@ datasource db {
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
-  password     String? // Null for Google OAuth users
+  password     String?
   username     String   @unique
-  cfHandle     String?  @unique // Codeforces handle
+  cfHandle     String?  @unique
   googleId     String?  @unique
   rating       Int      @default(0)
   wins         Int      @default(0)
@@ -25,7 +25,6 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // Relations
   matchesAsPlayer1 Match[]            @relation("Player1Matches")
   matchesAsPlayer2 Match[]            @relation("Player2Matches")
   wonMatches       Match[]            @relation("WonMatches")
@@ -33,6 +32,8 @@ model User {
   joinedDuels      Duel[]             @relation("DuelOpponent")
   queueEntries     MatchmakingQueue[]
   GlobalMessage    GlobalMessage[]
+
+  @@index([rating(sort: Desc)])
 }
 
 // Matchmaking Queue
@@ -47,7 +48,6 @@ model MatchmakingQueue {
   status    String   @default("waiting") // waiting, matched, cancelled
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
   @@index([status, createdAt])
 }
 
@@ -141,13 +141,15 @@ model Message {
 
 // Global message schema
 model GlobalMessage {
-  id        String   @id @default(uuid())
-  content   String   @db.Text
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid())
+  content    String   @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt        // ADD THIS
+  isEdited   Boolean  @default(false)   // ADD THIS
+  isDeleted  Boolean  @default(false)
 
-  // Relations
   senderId   String
-  senderName String // De-normalized for easy access
+  senderName String
   sender     User   @relation(fields: [senderId], references: [id])
 
   @@index([createdAt])
