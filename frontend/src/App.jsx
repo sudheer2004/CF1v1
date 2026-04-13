@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader } from 'lucide-react';
 import AuthPage from './components/AuthPage';
 import Navbar from './components/Navbar';
@@ -20,9 +20,27 @@ const devLog = (...args) => {
   if (isDev) console.log(...args);
 };
 
+const VIEW_TO_PATH = {
+  login: '/',
+  dashboard: '/dashboard',
+  matchmaking: '/matchmaking',
+  duel: '/duel',
+  'team-battle': '/team-battle',
+  leaderboard: '/leaderboard',
+  'global-chat': '/global-chat',
+  profile: '/profile',
+  'report-issues': '/report-issues',
+};
+
+const PATH_TO_VIEW = Object.fromEntries(
+  Object.entries(VIEW_TO_PATH).map(([viewKey, path]) => [path, viewKey]),
+);
+
+const getViewFromPath = (pathname) => PATH_TO_VIEW[pathname] || 'dashboard';
+
 export default function App() {
   const [user, setUser] = useState(null);
-  const [view, setView] = useState('login');
+  const [view, setView] = useState(() => getViewFromPath(window.location.pathname));
   const [loading, setLoading] = useState(true);
   const [socket, setSocket] = useState(null);
   const [socketReady, setSocketReady] = useState(false);
@@ -43,9 +61,33 @@ export default function App() {
   const matchEndHandledRef = useRef(false);
   const teamBattleEndHandledRef = useRef(false);
 
+  const navigateToView = useCallback((nextView, options = {}) => {
+    const { replace = false } = options;
+    const normalizedView = nextView || 'dashboard';
+    const nextPath = VIEW_TO_PATH[normalizedView] || VIEW_TO_PATH.dashboard;
+
+    setView(normalizedView);
+
+    if (window.location.pathname !== nextPath) {
+      const method = replace ? 'replaceState' : 'pushState';
+      window.history[method]({ view: normalizedView }, '', nextPath);
+    }
+  }, []);
+
   // Check authentication on mount
   useEffect(() => {
     checkAuth();
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextView = getViewFromPath(window.location.pathname);
+      setView(nextView);
+      setError(null);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   // Handle Google OAuth callback
@@ -74,13 +116,13 @@ export default function App() {
                 problemUrl: matchResponse.problemUrl,
               });
               setMatchAttempts(matchResponse.attempts);
-              setView('matchmaking');
+              navigateToView('matchmaking', { replace: true });
             } else {
-              setView('dashboard');
+              navigateToView('dashboard', { replace: true });
             }
           } catch (err) {
             devLog('⚠️ OAuth: No active match found');
-            setView('dashboard');
+            navigateToView('dashboard', { replace: true });
           }
           
           setLoading(false);
@@ -99,7 +141,7 @@ export default function App() {
     };
 
     handleOAuthCallback();
-  }, []);
+  }, [navigateToView]);
 
   // Initialize socket connection
   useEffect(() => {
@@ -194,7 +236,7 @@ export default function App() {
           setMatchAttempts(matchResponse.attempts);
           
           if (view !== 'matchmaking' && view !== 'duel') {
-            setView('matchmaking');
+            navigateToView('matchmaking', { replace: true });
           }
         }
       } catch (err) {
@@ -203,7 +245,7 @@ export default function App() {
     }, 5000);
 
     return () => clearInterval(pollInterval);
-  }, [user, activeMatch, matchResult, view]);
+  }, [user, activeMatch, matchResult, view, navigateToView]);
 
   // Poll for active team battle (fallback)
   useEffect(() => {
@@ -316,14 +358,14 @@ export default function App() {
         
         setTimeout(() => {
           setMatchResult(null);
-          setView('dashboard');
+          navigateToView('dashboard', { replace: true });
           setError(null);
         }, 5000);
       }, 10000);
 
       return () => clearTimeout(timeoutId);
     }
-  }, [matchTimer, activeMatch, matchResult, user]);
+  }, [matchTimer, activeMatch, matchResult, user, navigateToView]);
 
   // Sync match attempts periodically
   useEffect(() => {
@@ -364,7 +406,7 @@ export default function App() {
             });
             
             setMatchAttempts(matchResponse.attempts);
-            setView('matchmaking');
+            navigateToView('matchmaking', { replace: true });
           } else {
             try {
               const battleResponse = await api.getActiveTeamBattle();
@@ -374,7 +416,7 @@ export default function App() {
                 
                 setActiveTeamBattle(battleResponse.battle);
                 setTeamBattleStats(battleResponse.stats);
-                setView('team-battle');
+                navigateToView('team-battle', { replace: true });
                 
                 if (socket && socketReady) {
                   socket.emit('join-team-battle-room', { 
@@ -382,19 +424,20 @@ export default function App() {
                   });
                 }
               } else {
-                setView('dashboard');
+                navigateToView(view === 'login' ? 'dashboard' : view, { replace: true });
               }
             } catch (err) {
               devLog('⚠️ Auth: No active team battle found');
-              setView('dashboard');
+              navigateToView(view === 'login' ? 'dashboard' : view, { replace: true });
             }
           }
         } catch (err) {
           devLog('⚠️ Auth: No active match found');
-          setView('dashboard');
+          navigateToView(view === 'login' ? 'dashboard' : view, { replace: true });
         }
       } catch (err) {
         localStorage.removeItem('token');
+        navigateToView('login', { replace: true });
       }
     }
     setLoading(false);
@@ -409,7 +452,7 @@ export default function App() {
     
     localStorage.removeItem('token');
     setUser(null);
-    setView('login');
+    navigateToView('login', { replace: true });
     setActiveMatch(null);
     setMatchResult(null);
     setMatchTimer(0);
@@ -452,7 +495,7 @@ export default function App() {
       {user ? (
         <>
           {/* Always show Navbar when user is logged in */}
-          <Navbar user={user} view={view} setView={setView} onLogout={handleLogout} />
+          <Navbar user={user} view={view} setView={navigateToView} onLogout={handleLogout} />
           
           {/* Global Chat Full Page - Renders outside main container */}
           {view === 'global-chat' ? (
@@ -460,11 +503,11 @@ export default function App() {
               user={user}
               socket={socket}
               socketReady={socketReady}
-              setView={setView}
+              setView={navigateToView}
             />
           ) : (
             <main className="container mx-auto px-4 py-8 max-w-7xl">
-              {view === 'dashboard' && <Dashboard user={user} setView={setView} />}
+              {view === 'dashboard' && <Dashboard user={user} setView={navigateToView} />}
               {view === 'matchmaking' && (
                 <Matchmaking 
                   user={user} 
@@ -518,12 +561,12 @@ export default function App() {
               user={user}
               socket={socket}
               socketReady={socketReady}
-              setView={setView}
+              setView={navigateToView}
             />
           )}
         </>
       ) : (
-        <AuthPage setUser={setUser} setView={setView} />
+        <AuthPage setUser={setUser} setView={navigateToView} />
       )}
     </div>
   );
