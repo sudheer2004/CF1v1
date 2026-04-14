@@ -4,8 +4,10 @@ import { getRatingColor, getRatingBadge } from '../utils/constants';
 import api from '../services/api.service';
 
 export default function Profile({ user, setUser }) {
-  const [editing, setEditing] = useState(false);
+  const [editingCfHandle, setEditingCfHandle] = useState(false);
+  const [editingUsername, setEditingUsername] = useState(false);
   const [cfHandle, setCfHandle] = useState(user.cfHandle || '');
+  const [username, setUsername] = useState(user.username || '');
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [matchesLoading, setMatchesLoading] = useState(true);
@@ -40,7 +42,33 @@ export default function Profile({ user, setUser }) {
       const response = await api.updateCfHandle(cfHandle);
       setUser({ ...user, cfHandle: response.data.user.cfHandle });
       setSuccess('Codeforces handle updated successfully!');
-      setEditing(false);
+      setEditingCfHandle(false);
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateUsername = async () => {
+    if (!username.trim()) {
+      setError('Username cannot be empty');
+      return;
+    }
+
+    if (username.trim().length < 3) {
+      setError('Username must be at least 3 characters');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+      const response = await api.updateUsername(username.trim());
+      setUser({ ...user, username: response.data.user.username });
+      setSuccess('Username updated successfully!');
+      setEditingUsername(false);
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       setError(err.message);
@@ -79,9 +107,13 @@ export default function Profile({ user, setUser }) {
         <div className="border-t border-gray-700 pt-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-white font-medium">Codeforces Handle</h3>
-            {!editing && (
+            {!editingCfHandle && (
               <button
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  setEditingCfHandle(true);
+                  setEditingUsername(false);
+                  setError('');
+                }}
                 className="flex items-center space-x-2 text-purple-400 hover:text-purple-300"
               >
                 <Edit className="w-4 h-4" />
@@ -102,7 +134,7 @@ export default function Profile({ user, setUser }) {
             </div>
           )}
 
-          {editing ? (
+          {editingCfHandle ? (
             <div className="flex items-center space-x-2">
               <input
                 type="text"
@@ -120,7 +152,7 @@ export default function Profile({ user, setUser }) {
               </button>
               <button
                 onClick={() => {
-                  setEditing(false);
+                  setEditingCfHandle(false);
                   setCfHandle(user.cfHandle || '');
                   setError('');
                 }}
@@ -133,6 +165,57 @@ export default function Profile({ user, setUser }) {
             <p className="text-lg text-purple-400">
               {user.cfHandle || 'Not set (required for matches)'}
             </p>
+          )}
+        </div>
+
+        {/* Username Section */}
+        <div className="border-t border-gray-700 pt-6 mt-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-white font-medium">Username</h3>
+            {!editingUsername && (
+              <button
+                onClick={() => {
+                  setEditingUsername(true);
+                  setEditingCfHandle(false);
+                  setError('');
+                }}
+                className="flex items-center space-x-2 text-purple-400 hover:text-purple-300"
+              >
+                <Edit className="w-4 h-4" />
+                <span>Edit</span>
+              </button>
+            )}
+          </div>
+
+          {editingUsername ? (
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Enter your username"
+                className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500"
+              />
+              <button
+                onClick={handleUpdateUsername}
+                disabled={loading}
+                className="p-2 bg-green-600 hover:bg-green-700 rounded-lg transition"
+              >
+                <Save className="w-5 h-5 text-white" />
+              </button>
+              <button
+                onClick={() => {
+                  setEditingUsername(false);
+                  setUsername(user.username || '');
+                  setError('');
+                }}
+                className="p-2 bg-red-600 hover:bg-red-700 rounded-lg transition"
+              >
+                <X className="w-5 h-5 text-white" />
+              </button>
+            </div>
+          ) : (
+            <p className="text-lg text-white">{user.username}</p>
           )}
         </div>
       </div>

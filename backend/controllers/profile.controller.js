@@ -62,6 +62,52 @@ const updateCfHandle = async (req, res) => {
   }
 };
 
+// Update username
+const updateUsername = async (req, res) => {
+  try {
+    const { username } = req.body;
+    const userId = req.user.id;
+
+    if (!username || !username.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'username is required',
+      });
+    }
+
+    const trimmedUsername = username.trim();
+
+    if (trimmedUsername.length < 3) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username must be at least 3 characters',
+      });
+    }
+
+    const existingUser = await userService.findUserByUsername(trimmedUsername);
+    if (existingUser && existingUser.id !== userId) {
+      return res.status(409).json({
+        success: false,
+        message: 'Username already taken',
+      });
+    }
+
+    const user = await userService.updateUsername(userId, trimmedUsername);
+
+    res.status(200).json({
+      success: true,
+      message: 'Username updated successfully',
+      data: { user },
+    });
+  } catch (error) {
+    console.error('Update username error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update username',
+    });
+  }
+};
+
 // Get match history
 const getMatchHistory = async (req, res) => {
   try {
@@ -93,5 +139,6 @@ const getMatchHistory = async (req, res) => {
 module.exports = {
   getProfile,
   updateCfHandle,
+  updateUsername,
   getMatchHistory,
 };

@@ -109,6 +109,19 @@ const updateCfHandle = async (userId, cfHandle) => {
   });
 };
 
+// Update username
+const updateUsername = async (userId, username) => {
+  return prisma.user.update({
+    where: { id: userId },
+    data: { username },
+    select: {
+      id: true,
+      username: true,
+      cfHandle: true,
+    },
+  });
+};
+
 // Update user rating and stats
 const updateUserStats = async (userId, ratingChange, result) => {
   const user = await prisma.user.findUnique({
@@ -144,5 +157,6 @@ module.exports = {
   findUserById,
   verifyPassword,
   updateCfHandle,
+  updateUsername,
   updateUserStats,
 };

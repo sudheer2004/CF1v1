@@ -21,8 +21,13 @@ export default function TeamBattleMain({
   setActiveBattle,
   battleStats,
   setBattleStats,
+  routeSubview,
+  navigateToView,
 }) {
   const { mode, setMode, isCreator, setIsCreator, resetState } = useTeamBattleState(activeBattle, user);
+  const displayMode = ["waiting", "match", "result"].includes(mode)
+    ? mode
+    : (routeSubview === "create" || routeSubview === "join" ? routeSubview : "menu");
   
   const [copied, setCopied] = useState("");
   const [roomCode, setRoomCode] = useState("");
@@ -91,7 +96,31 @@ export default function TeamBattleMain({
     setIsLeaving(false);
     setEarlyCompletion(false);
     resetState();
+    navigateToView?.("team-battle", { replace: true });
   };
+
+  useEffect(() => {
+    if (!navigateToView) return;
+
+    if (mode === "waiting" && activeBattle) {
+      navigateToView("team-battle", { replace: true, subview: "waiting" });
+      return;
+    }
+
+    if (mode === "match" && activeBattle) {
+      navigateToView("team-battle", { replace: true, subview: "match" });
+      return;
+    }
+
+    if (mode === "result" && activeBattle) {
+      navigateToView("team-battle", { replace: true, subview: "result" });
+      return;
+    }
+
+    if (!activeBattle && ["waiting", "match", "result"].includes(routeSubview || "")) {
+      navigateToView("team-battle", { replace: true });
+    }
+  }, [mode, activeBattle, routeSubview, navigateToView]);
 
   // Initialize stats if missing when in match mode
   useEffect(() => {
@@ -177,6 +206,7 @@ export default function TeamBattleMain({
         setIsCreator(false);
         setIsJoining(false);
         setMode("waiting");
+        navigateToView?.("team-battle", { replace: true });
       }
     } catch (err) {
       console.error("❌ Join room error:", err);
@@ -351,18 +381,7 @@ export default function TeamBattleMain({
 
   // ===== RENDER MODES =====
   
-  if (mode === "menu") {
-    return (
-      <TeamBattleMenu
-        socketReady={socketReady}
-        error={error}
-        setError={setError}
-        setMode={setMode}
-      />
-    );
-  }
-
-  if (mode === "create") {
+  if (displayMode === "create") {
     return (
       <CreateBattleForm
         formData={formData}
@@ -371,12 +390,15 @@ export default function TeamBattleMain({
         isCreating={isCreating}
         socketReady={socketReady}
         onCreate={handleCreateRoom}
-        onBack={handleBackToMenu}
+        onBack={() => {
+          setError("");
+          navigateToView?.("team-battle");
+        }}
       />
     );
   }
 
-  if (mode === "join") {
+  if (displayMode === "join") {
     return (
       <JoinBattleForm
         roomCode={roomCode}
@@ -385,7 +407,22 @@ export default function TeamBattleMain({
         isJoining={isJoining}
         socketReady={socketReady}
         onJoin={handleJoinRoom}
-        onBack={handleBackToMenu}
+        onBack={() => {
+          setError("");
+          setRoomCode("");
+          navigateToView?.("team-battle");
+        }}
+      />
+    );
+  }
+
+  if (displayMode === "menu") {
+    return (
+      <TeamBattleMenu
+        socketReady={socketReady}
+        error={error}
+        setError={setError}
+        setMode={(nextMode) => navigateToView?.("team-battle", { subview: nextMode })}
       />
     );
   }

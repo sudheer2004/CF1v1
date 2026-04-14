@@ -10,6 +10,7 @@ router.use(authMiddleware);
 router.get('/me', profileController.getProfile);
 router.get('/:userId', profileController.getProfile);
 router.put('/cfhandle', profileController.updateCfHandle);
+router.put('/username', profileController.updateUsername);
 router.get('/:userId/matches', profileController.getMatchHistory);
 
 module.exports = router;

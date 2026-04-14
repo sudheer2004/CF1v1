@@ -9,7 +9,7 @@ import MatchSettingsForm, { isFormValid } from './MatchSettingsForm';
 export default function DuelMode({
   user, socket, activeMatch, setActiveMatch,
   matchResult, setMatchResult, matchTimer, setMatchTimer,
-  matchAttempts, setMatchAttempts
+  matchAttempts, setMatchAttempts, routeSubview, navigateToView, activeMatchContext, updateMatchContext
 }) {
   const [mode, setMode] = useState('menu');
   const [duel, setDuel] = useState(null);
@@ -31,6 +31,9 @@ export default function DuelMode({
 
   const listenersRegistered = useRef(false);
   const currentDuelCode = useRef(null);
+  const displayMode = mode === 'waiting'
+    ? 'waiting'
+    : (routeSubview === 'create' || routeSubview === 'join' ? routeSubview : 'menu');
 
   // Use shared match manager hook
   const {
@@ -82,6 +85,7 @@ export default function DuelMode({
         currentDuelCode.current = data.duel.duelCode;
         setDuel(data.duel);
         setMode('waiting');
+        navigateToView?.('duel', { replace: true });
         setIsCreatingDuel(false);
         setError('');
         setWaitingForMatch(false);
@@ -100,6 +104,8 @@ export default function DuelMode({
       setDuel(null);
       currentDuelCode.current = null;
       setMode('menu');
+      updateMatchContext?.('duel');
+      navigateToView?.('duel', { replace: true, subview: 'match' });
       setIsJoiningDuel(false);
       setIsCreatingDuel(false);
       
@@ -153,7 +159,7 @@ export default function DuelMode({
       socketService.off('error', handleError);
       listenersRegistered.current = false;
     };
-  }, [socket, setActiveMatch, setMatchResult, setMatchAttempts]);
+  }, [socket, setActiveMatch, setMatchResult, setMatchAttempts, navigateToView, updateMatchContext]);
 
   // Monitor when someone joins the duel
   useEffect(() => {
@@ -169,6 +175,17 @@ export default function DuelMode({
       return () => clearTimeout(timeout);
     }
   }, [mode, duel, waitingForMatch, isPreparingMatch]);
+
+  useEffect(() => {
+    if (activeMatchContext === 'duel' && activeMatch && routeSubview !== 'match') {
+      navigateToView?.('duel', { replace: true, subview: 'match' });
+      return;
+    }
+
+    if (!activeMatch && routeSubview === 'match') {
+      navigateToView?.('duel', { replace: true });
+    }
+  }, [activeMatch, activeMatchContext, routeSubview, navigateToView]);
 
   const handleCreateDuel = () => {
     if (!user.cfHandle) {
@@ -220,6 +237,8 @@ export default function DuelMode({
     setError('');
     setIsAcceptingDraw(false);
     setIsPreparingMatch(false); // ✅ Reset preparing state
+    updateMatchContext?.(null);
+    navigateToView?.('duel', { replace: true });
   };
 
   const handleCancelDuel = () => {
@@ -229,6 +248,7 @@ export default function DuelMode({
     setError('');
     setWaitingForMatch(false);
     setIsPreparingMatch(false); // ✅ Reset preparing state
+    navigateToView?.('duel', { replace: true });
   };
 
   // Match Result View
@@ -244,7 +264,7 @@ export default function DuelMode({
   }
 
   // Active Match View
-  if (activeMatch) {
+  if (activeMatch && activeMatchContext === 'duel') {
     return (
       <ActiveMatchView
         user={user}
@@ -371,7 +391,7 @@ export default function DuelMode({
   }
 
   // Create Duel Form
-  if (mode === 'create') {
+  if (displayMode === 'create') {
     return (
       <div className="max-w-4xl mx-auto">
         <div className="bg-gray-800/50 backdrop-blur-lg rounded-lg p-8 border border-purple-500/20">
@@ -379,7 +399,7 @@ export default function DuelMode({
             <h2 className="text-2xl font-bold text-white">Create Custom Duel</h2>
             <button
               onClick={() => {
-                setMode('menu');
+                navigateToView?.('duel');
                 setError('');
               }}
               disabled={isCreatingDuel}
@@ -424,7 +444,7 @@ export default function DuelMode({
   }
 
   // Join Duel Form
-  if (mode === 'join') {
+  if (displayMode === 'join') {
     return (
       <div className="max-w-md mx-auto">
         <div className="bg-gray-800/50 backdrop-blur-lg rounded-lg p-8 border border-purple-500/20">
@@ -432,7 +452,7 @@ export default function DuelMode({
             <h2 className="text-2xl font-bold text-white">Join Duel</h2>
             <button
               onClick={() => {
-                setMode('menu');
+                navigateToView?.('duel');
                 setError('');
                 setJoinCode('');
               }}
@@ -501,7 +521,7 @@ export default function DuelMode({
       <div className="grid md:grid-cols-2 gap-6">
         <button
           onClick={() => {
-            setMode('create');
+            navigateToView?.('duel', { subview: 'create' });
             setError('');
           }}
           disabled={activeMatch}
@@ -521,7 +541,7 @@ export default function DuelMode({
 
         <button
           onClick={() => {
-            setMode('join');
+            navigateToView?.('duel', { subview: 'join' });
             setError('');
             setJoinCode('');
           }}

@@ -17,10 +17,9 @@ import socketService from '../services/socket.service';
 import LinkifiedText from './LinkifiedText';
 import { getAvatarColor, getInitials, formatRelativeTime } from '../utils/chatUtils';
 
-export default function GlobalChatPage({ user, socket, socketReady, setView }) {
+export default function GlobalChatPage({ user, socket, socketReady, onlineCount = 0 }) {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
-  const [onlineCount, setOnlineCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -136,11 +135,6 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
       );
     };
 
-    const handleOnlineCount = (count) => {
-      console.log('👥 Online users:', count);
-      setOnlineCount(count);
-    };
-
     const handleRateLimit = ({ message, secondsUntilReset }) => {
       console.log('⚠️ Rate limit exceeded:', secondsUntilReset);
       setRateLimitInfo({ message, secondsUntilReset });
@@ -161,7 +155,6 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
     socketService.onGlobalMessage(handleNewMessage);
     socketService.onGlobalMessageEdited(handleMessageEdited);
     socketService.onGlobalMessageDeleted(handleMessageDeleted);
-    socketService.onOnlineUsersCount(handleOnlineCount);
     socketService.onRateLimitExceeded(handleRateLimit);
     socketService.on('error', handleError);
 
@@ -169,7 +162,6 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
       socketService.offGlobalMessage(handleNewMessage);
       socketService.offGlobalMessageEdited(handleMessageEdited);
       socketService.offGlobalMessageDeleted(handleMessageDeleted);
-      socketService.offOnlineUsersCount(handleOnlineCount);
       socketService.offRateLimitExceeded(handleRateLimit);
       socketService.off('error', handleError);
     };
@@ -284,8 +276,8 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
   return (
     <div className="fixed inset-0 flex flex-col bg-[#0a0a0f]">
       {/* Fixed Header */}
-      <header className="fixed top-16 left-0 right-0 z-40 border-b border-gray-800/50 bg-[#12121a]">
-        <div className="mx-auto max-w-4xl px-4 py-3">
+      <header className="fixed top-14 left-0 right-0 z-40 border-b border-gray-800/40 bg-[#0a0a0f]/95 backdrop-blur-md">
+        <div className="mx-auto max-w-4xl px-4 py-3.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div
@@ -322,7 +314,7 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
 
       {/* Error Banner */}
       {error && (
-        <div className="fixed top-[120px] left-0 right-0 z-30 bg-red-500/10 border-b border-red-500/30">
+        <div className="fixed top-[112px] left-0 right-0 z-30 bg-red-500/10 border-b border-red-500/30">
           <div className="mx-auto max-w-4xl px-4 py-2.5 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-red-400" />
@@ -337,7 +329,7 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
 
       {/* Rate Limit Banner */}
       {rateLimitInfo && (
-        <div className="fixed top-[120px] left-0 right-0 z-30 bg-yellow-500/10 border-b border-yellow-500/30">
+        <div className="fixed top-[112px] left-0 right-0 z-30 bg-yellow-500/10 border-b border-yellow-500/30">
           <div className="mx-auto max-w-4xl px-4 py-2.5 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-yellow-400" />
             <span className="text-sm text-yellow-300">{rateLimitInfo.message}</span>
@@ -346,11 +338,11 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
       )}
 
       {/* Messages Area */}
-      <main className="flex-1 overflow-hidden" style={{ marginTop: '120px', marginBottom: '80px' }}>
+      <main className="flex-1 overflow-hidden" style={{ marginTop: '124px', marginBottom: '84px' }}>
         <div
           ref={messagesContainerRef}
           onScroll={handleScroll}
-          className="h-full mx-auto max-w-4xl overflow-y-auto px-4 py-4"
+          className="h-full mx-auto max-w-4xl overflow-y-auto px-4 py-5"
           style={{ scrollbarWidth: 'thin', scrollbarColor: '#374151 transparent' }}
         >
           {/* Loading more indicator */}
@@ -383,7 +375,7 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
 
           {/* Messages */}
           {visibleMessages.length > 0 && (
-            <div className="space-y-0.5">
+            <div className="space-y-1">
               {visibleMessages.map((msg, i) => {
                 const isOwn = msg.senderId === user.id;
                 const prevMsg = visibleMessages[i - 1];
@@ -396,14 +388,14 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
                   <div
                     key={msg.id}
                     className={`relative flex ${isOwn ? 'justify-end' : 'justify-start'} ${
-                      !sameSender && i > 0 ? 'mt-4' : ''
+                      !sameSender && i > 0 ? 'mt-4.5' : 'mt-0'
                     }`}
                     onMouseEnter={() => setHoveredMessageId(msg.id)}
                     onMouseLeave={() => setHoveredMessageId(null)}
                   >
                     {/* Avatar for others */}
                     {!isOwn && (
-                      <div className={`mr-2.5 flex-shrink-0 ${sameSender ? 'w-8' : ''}`}>
+                      <div className={`mr-3 flex-shrink-0 ${sameSender ? 'w-8' : ''}`}>
                         {showAvatar && (
                           <div
                             className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white"
@@ -416,9 +408,9 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
                     )}
 
                     {/* Message Content */}
-                    <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[70%]`}>
+                    <div className={`flex flex-col gap-1 ${isOwn ? 'items-end' : 'items-start'} max-w-[70%]`}>
                       {!isOwn && showAvatar && (
-                        <span className="text-xs font-medium text-purple-400 mb-1 px-0.5">
+                        <span className="text-xs font-medium text-purple-400 px-0.5 leading-none">
                           {msg.senderName}
                         </span>
                       )}
@@ -458,7 +450,7 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
                       ) : (
                         /* Message Bubble — inline style guarantees bg renders */
                         <div
-                          className={`rounded-2xl px-3.5 py-2 text-white ${isOwn ? 'rounded-br-md' : 'rounded-bl-md'}`}
+                          className={`rounded-2xl px-4 py-2.5 text-white ${isOwn ? 'rounded-br-md' : 'rounded-bl-md'}`}
                           style={isOwn
                             ? { background: 'linear-gradient(135deg, #9333ea, #2563eb)' }
                             : { backgroundColor: '#1e1e2e' }
@@ -468,7 +460,7 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
                             text={msg.content}
                             className="text-sm leading-relaxed break-words"
                           />
-                          <p className={`text-[10px] mt-1 flex items-center gap-1 ${isOwn ? 'text-purple-200' : 'text-gray-500'}`}>
+                          <p className={`text-[10px] mt-1.5 flex items-center gap-1 ${isOwn ? 'text-purple-200' : 'text-gray-500'}`}>
                             {formatRelativeTime(msg.createdAt)}
                             {msg.isEdited && <span className="italic">(edited)</span>}
                           </p>
@@ -523,7 +515,7 @@ export default function GlobalChatPage({ user, socket, socketReady, setView }) {
 
       {/* Fixed Input Bar */}
       <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-800/50 bg-[#12121a]">
-        <form onSubmit={handleSendMessage} className="mx-auto max-w-4xl px-4 py-3 flex items-center gap-3">
+        <form onSubmit={handleSendMessage} className="mx-auto max-w-4xl px-4 py-3.5 flex items-center gap-3">
           <input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}

@@ -19,6 +19,7 @@ const isDev = import.meta.env.MODE === 'development';
 const devLog = (...args) => {
   if (isDev) console.log(...args);
 };
+const MATCH_CONTEXT_STORAGE_KEY = 'activeMatchContext';
 
 const VIEW_TO_PATH = {
   login: '/',
@@ -32,24 +33,68 @@ const VIEW_TO_PATH = {
   'report-issues': '/report-issues',
 };
 
-const PATH_TO_VIEW = Object.fromEntries(
-  Object.entries(VIEW_TO_PATH).map(([viewKey, path]) => [path, viewKey]),
-);
+const VIEW_SUBROUTES = {
+  duel: new Set(['create', 'join', 'match']),
+  'team-battle': new Set(['create', 'join', 'waiting', 'match', 'result']),
+};
 
-const getViewFromPath = (pathname) => PATH_TO_VIEW[pathname] || 'dashboard';
+const getRouteStateFromPath = (pathname) => {
+  const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
+
+  if (normalizedPath === '/') {
+    return { view: 'login', subview: null };
+  }
+
+  for (const [viewKey, basePath] of Object.entries(VIEW_TO_PATH)) {
+    if (viewKey === 'login') continue;
+
+    if (normalizedPath === basePath) {
+      return { view: viewKey, subview: null };
+    }
+
+    if (normalizedPath.startsWith(`${basePath}/`)) {
+      const subview = normalizedPath.slice(basePath.length + 1);
+      const allowedSubroutes = VIEW_SUBROUTES[viewKey];
+
+      return {
+        view: viewKey,
+        subview: allowedSubroutes?.has(subview) ? subview : null,
+      };
+    }
+  }
+
+  return { view: 'dashboard', subview: null };
+};
+
+const buildPathForView = (viewKey, subview = null) => {
+  const basePath = VIEW_TO_PATH[viewKey] || VIEW_TO_PATH.dashboard;
+  const allowedSubroutes = VIEW_SUBROUTES[viewKey];
+
+  if (allowedSubroutes?.has(subview)) {
+    return `${basePath}/${subview}`;
+  }
+
+  return basePath;
+};
 
 export default function App() {
+  const initialRoute = getRouteStateFromPath(window.location.pathname);
   const [user, setUser] = useState(null);
-  const [view, setView] = useState(() => getViewFromPath(window.location.pathname));
+  const [view, setView] = useState(initialRoute.view);
+  const [subview, setSubview] = useState(initialRoute.subview);
   const [loading, setLoading] = useState(true);
   const [socket, setSocket] = useState(null);
   const [socketReady, setSocketReady] = useState(false);
+  const [globalOnlineCount, setGlobalOnlineCount] = useState(0);
   
   // Match states
   const [activeMatch, setActiveMatch] = useState(null);
   const [matchResult, setMatchResult] = useState(null);
   const [matchTimer, setMatchTimer] = useState(0);
   const [matchAttempts, setMatchAttempts] = useState({ player1: 0, player2: 0 });
+  const [activeMatchContext, setActiveMatchContext] = useState(
+    () => sessionStorage.getItem(MATCH_CONTEXT_STORAGE_KEY) || null,
+  );
   
   // Team Battle states
   const [activeTeamBattle, setActiveTeamBattle] = useState(null);
@@ -62,15 +107,33 @@ export default function App() {
   const teamBattleEndHandledRef = useRef(false);
 
   const navigateToView = useCallback((nextView, options = {}) => {
-    const { replace = false } = options;
+    const { replace = false, subview: nextSubview = null } = options;
     const normalizedView = nextView || 'dashboard';
-    const nextPath = VIEW_TO_PATH[normalizedView] || VIEW_TO_PATH.dashboard;
+    const normalizedSubview = VIEW_SUBROUTES[normalizedView]?.has(nextSubview)
+      ? nextSubview
+      : null;
+    const nextPath = buildPathForView(normalizedView, normalizedSubview);
 
     setView(normalizedView);
+    setSubview(normalizedSubview);
 
     if (window.location.pathname !== nextPath) {
       const method = replace ? 'replaceState' : 'pushState';
-      window.history[method]({ view: normalizedView }, '', nextPath);
+      window.history[method](
+        { view: normalizedView, subview: normalizedSubview },
+        '',
+        nextPath,
+      );
+    }
+  }, []);
+
+  const updateMatchContext = useCallback((nextContext) => {
+    setActiveMatchContext(nextContext);
+
+    if (nextContext) {
+      sessionStorage.setItem(MATCH_CONTEXT_STORAGE_KEY, nextContext);
+    } else {
+      sessionStorage.removeItem(MATCH_CONTEXT_STORAGE_KEY);
     }
   }, []);
 
@@ -81,8 +144,9 @@ export default function App() {
 
   useEffect(() => {
     const handlePopState = () => {
-      const nextView = getViewFromPath(window.location.pathname);
-      setView(nextView);
+      const nextRoute = getRouteStateFromPath(window.location.pathname);
+      setView(nextRoute.view);
+      setSubview(nextRoute.subview);
       setError(null);
     };
 
@@ -116,7 +180,15 @@ export default function App() {
                 problemUrl: matchResponse.problemUrl,
               });
               setMatchAttempts(matchResponse.attempts);
-              navigateToView('matchmaking', { replace: true });
+              const restoredContext = sessionStorage.getItem(MATCH_CONTEXT_STORAGE_KEY);
+              updateMatchContext(restoredContext);
+              navigateToView(
+                restoredContext === 'duel' ? 'duel' : 'matchmaking',
+                {
+                  replace: true,
+                  subview: restoredContext === 'duel' ? 'match' : null,
+                },
+              );
             } else {
               navigateToView('dashboard', { replace: true });
             }
@@ -141,7 +213,7 @@ export default function App() {
     };
 
     handleOAuthCallback();
-  }, [navigateToView]);
+  }, [navigateToView, updateMatchContext]);
 
   // Initialize socket connection
   useEffect(() => {
@@ -204,6 +276,20 @@ export default function App() {
     initializeSocket();
   }, [user]);
 
+  useEffect(() => {
+    if (!socket || !socketReady || !user) return;
+
+    const handleOnlineUsersCount = (count) => {
+      setGlobalOnlineCount(count);
+    };
+
+    socketService.onOnlineUsersCount(handleOnlineUsersCount);
+
+    return () => {
+      socketService.offOnlineUsersCount(handleOnlineUsersCount);
+    };
+  }, [socket, socketReady, user]);
+
   // Monitor socket connection status
   useEffect(() => {
     if (!user) return;
@@ -234,10 +320,15 @@ export default function App() {
           });
           
           setMatchAttempts(matchResponse.attempts);
-          
-          if (view !== 'matchmaking' && view !== 'duel') {
-            navigateToView('matchmaking', { replace: true });
-          }
+          const restoredContext = sessionStorage.getItem(MATCH_CONTEXT_STORAGE_KEY);
+          updateMatchContext(restoredContext);
+          navigateToView(
+            restoredContext === 'duel' ? 'duel' : 'matchmaking',
+            {
+              replace: true,
+              subview: restoredContext === 'duel' ? 'match' : null,
+            },
+          );
         }
       } catch (err) {
         // No active match
@@ -245,7 +336,7 @@ export default function App() {
     }, 5000);
 
     return () => clearInterval(pollInterval);
-  }, [user, activeMatch, matchResult, view, navigateToView]);
+  }, [user, activeMatch, matchResult, view, navigateToView, updateMatchContext]);
 
   // Poll for active team battle (fallback)
   useEffect(() => {
@@ -386,6 +477,30 @@ export default function App() {
     return () => clearInterval(syncInterval);
   }, [activeMatch?.match?.id, user]);
 
+  useEffect(() => {
+    if (!activeMatch && !matchResult && activeMatchContext) {
+      updateMatchContext(null);
+    }
+  }, [activeMatch, matchResult, activeMatchContext, updateMatchContext]);
+
+  useEffect(() => {
+    if (!activeMatch) return;
+
+    if (activeMatchContext === 'duel' && view === 'duel' && subview !== 'match') {
+      navigateToView('duel', { replace: true, subview: 'match' });
+      return;
+    }
+
+    if (activeMatchContext === 'duel' && view === 'matchmaking') {
+      navigateToView('duel', { replace: true, subview: 'match' });
+      return;
+    }
+
+    if (activeMatchContext === 'matchmaking' && view === 'duel') {
+      navigateToView('matchmaking', { replace: true });
+    }
+  }, [activeMatch, activeMatchContext, view, subview, navigateToView]);
+
   const checkAuth = async () => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -406,7 +521,15 @@ export default function App() {
             });
             
             setMatchAttempts(matchResponse.attempts);
-            navigateToView('matchmaking', { replace: true });
+            const restoredContext = sessionStorage.getItem(MATCH_CONTEXT_STORAGE_KEY);
+            updateMatchContext(restoredContext);
+            navigateToView(
+              restoredContext === 'duel' ? 'duel' : 'matchmaking',
+              {
+                replace: true,
+                subview: restoredContext === 'duel' ? 'match' : null,
+              },
+            );
           } else {
             try {
               const battleResponse = await api.getActiveTeamBattle();
@@ -416,7 +539,10 @@ export default function App() {
                 
                 setActiveTeamBattle(battleResponse.battle);
                 setTeamBattleStats(battleResponse.stats);
-                navigateToView('team-battle', { replace: true });
+                navigateToView('team-battle', {
+                  replace: true,
+                  subview: battleResponse.battle.status === 'waiting' ? 'waiting' : 'match',
+                });
                 
                 if (socket && socketReady) {
                   socket.emit('join-team-battle-room', { 
@@ -424,16 +550,25 @@ export default function App() {
                   });
                 }
               } else {
-                navigateToView(view === 'login' ? 'dashboard' : view, { replace: true });
+                navigateToView(view === 'login' ? 'dashboard' : view, {
+                  replace: true,
+                  subview: view === 'login' ? null : subview,
+                });
               }
             } catch (err) {
               devLog('⚠️ Auth: No active team battle found');
-              navigateToView(view === 'login' ? 'dashboard' : view, { replace: true });
+              navigateToView(view === 'login' ? 'dashboard' : view, {
+                replace: true,
+                subview: view === 'login' ? null : subview,
+              });
             }
           }
         } catch (err) {
           devLog('⚠️ Auth: No active match found');
-          navigateToView(view === 'login' ? 'dashboard' : view, { replace: true });
+          navigateToView(view === 'login' ? 'dashboard' : view, {
+            replace: true,
+            subview: view === 'login' ? null : subview,
+          });
         }
       } catch (err) {
         localStorage.removeItem('token');
@@ -457,6 +592,7 @@ export default function App() {
     setMatchResult(null);
     setMatchTimer(0);
     setMatchAttempts({ player1: 0, player2: 0 });
+    updateMatchContext(null);
     setActiveTeamBattle(null);
     setTeamBattleStats(null);
     setTeamBattleTimer(0);
@@ -503,7 +639,7 @@ export default function App() {
               user={user}
               socket={socket}
               socketReady={socketReady}
-              setView={navigateToView}
+              onlineCount={globalOnlineCount}
             />
           ) : (
             <main className="container mx-auto px-4 py-8 max-w-7xl">
@@ -521,6 +657,8 @@ export default function App() {
                   setMatchTimer={setMatchTimer}
                   matchAttempts={matchAttempts}
                   setMatchAttempts={setMatchAttempts}
+                  navigateToView={navigateToView}
+                  updateMatchContext={updateMatchContext}
                 />
               )}
               {view === 'duel' && (
@@ -536,6 +674,10 @@ export default function App() {
                   setMatchTimer={setMatchTimer}
                   matchAttempts={matchAttempts}
                   setMatchAttempts={setMatchAttempts}
+                  routeSubview={view === 'duel' ? subview : null}
+                  navigateToView={navigateToView}
+                  activeMatchContext={activeMatchContext}
+                  updateMatchContext={updateMatchContext}
                 />
               )}
               {view === 'team-battle' && (
@@ -547,6 +689,8 @@ export default function App() {
                   setActiveBattle={setActiveTeamBattle}
                   battleStats={teamBattleStats}
                   setBattleStats={setTeamBattleStats}
+                  routeSubview={view === 'team-battle' ? subview : null}
+                  navigateToView={navigateToView}
                 />
               )}
               {view === 'leaderboard' && <Leaderboard />}
@@ -561,6 +705,7 @@ export default function App() {
               user={user}
               socket={socket}
               socketReady={socketReady}
+              onlineCount={globalOnlineCount}
               setView={navigateToView}
             />
           )}

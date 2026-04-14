@@ -9,7 +9,7 @@ import MatchSettingsForm, { isFormValid } from './MatchSettingsForm';
 export default function Matchmaking({
   user, socket, socketReady, activeMatch, setActiveMatch,
   matchResult, setMatchResult, matchTimer, setMatchTimer,
-  matchAttempts, setMatchAttempts
+  matchAttempts, setMatchAttempts, navigateToView, updateMatchContext
 }) {
   const [inQueue, setInQueue] = useState(false);
   const [formData, setFormData] = useState({
@@ -95,6 +95,8 @@ export default function Matchmaking({
       setIsPreparingMatch(false); // ✅ Reset preparing state
       queueStartTime.current = null;
       setQueueTime(0);
+      updateMatchContext?.('matchmaking');
+      navigateToView?.('matchmaking', { replace: true });
       
       // Validate that endTime exists before setting active match
       if (!data.match?.endTime) {
@@ -145,7 +147,7 @@ export default function Matchmaking({
       socketService.off('error', handleError);
       listenersRegistered.current = false;
     };
-  }, [socket, setActiveMatch, setMatchResult, setMatchAttempts]);
+  }, [socket, setActiveMatch, setMatchResult, setMatchAttempts, navigateToView, updateMatchContext]);
 
   // Enhanced queue timer with more accurate tracking
   useEffect(() => {
@@ -219,6 +221,7 @@ export default function Matchmaking({
     setIsPreparingMatch(false); // ✅ Reset preparing state
     setQueueTime(0);
     queueStartTime.current = null;
+    updateMatchContext?.(null);
   };
 
   const formatTime = (seconds) => {

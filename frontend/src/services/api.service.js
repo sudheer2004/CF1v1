@@ -68,6 +68,13 @@ class ApiService {
     });
   }
 
+  async updateUsername(username) {
+    return this.call('/profile/username', {
+      method: 'PUT',
+      body: JSON.stringify({ username }),
+    });
+  }
+
   async getMatchHistory(userId, limit = 20, offset = 0) {
     return this.call(`/profile/${userId}/matches?limit=${limit}&offset=${offset}`);
   }

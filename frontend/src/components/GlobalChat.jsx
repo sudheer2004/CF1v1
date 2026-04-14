@@ -4,11 +4,10 @@ import socketService from '../services/socket.service';
 import LinkifiedText from './LinkifiedText';
 import { getAvatarColor, getInitials, formatRelativeTime } from '../utils/chatUtils';
 
-export default function GlobalChat({ user, socket, socketReady, setView }) {
+export default function GlobalChat({ user, socket, socketReady, setView, onlineCount = 0 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
-  const [onlineCount, setOnlineCount] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
   const [rateLimitInfo, setRateLimitInfo] = useState(null);
   const [hoveredMessageId, setHoveredMessageId] = useState(null);
@@ -73,8 +72,6 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
       setMessages(prev => prev.map(m => m.id === message.id ? { ...m, isDeleted: true } : m));
     };
 
-    const handleOnlineCount = (count) => setOnlineCount(count);
-
     const handleRateLimit = ({ message, secondsUntilReset }) => {
       setRateLimitInfo({ message, secondsUntilReset });
       setTimeout(() => setRateLimitInfo(null), secondsUntilReset * 1000);
@@ -83,14 +80,12 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
     socketService.onGlobalMessage(handleNewMessage);
     socketService.onGlobalMessageEdited(handleMessageEdited);
     socketService.onGlobalMessageDeleted(handleMessageDeleted);
-    socketService.onOnlineUsersCount(handleOnlineCount);
     socketService.onRateLimitExceeded(handleRateLimit);
 
     return () => {
       socketService.offGlobalMessage(handleNewMessage);
       socketService.offGlobalMessageEdited(handleMessageEdited);
       socketService.offGlobalMessageDeleted(handleMessageDeleted);
-      socketService.offOnlineUsersCount(handleOnlineCount);
       socketService.offRateLimitExceeded(handleRateLimit);
     };
   }, [socket, socketReady, user.id, isOpen, scrollToBottom]);
@@ -162,7 +157,7 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
 
   if (!isOpen) {
     return (
-      <button
+        <button
         onClick={() => setIsOpen(true)}
         className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-110"
         style={{ background: 'linear-gradient(135deg, #9333ea, #2563eb)' }}
@@ -184,7 +179,7 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
       style={{ height: 'min(580px, calc(100vh - 60px))' }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between rounded-t-2xl bg-[#12121a] border-b border-gray-800/50 px-4 py-3">
+      <div className="flex items-center justify-between rounded-t-2xl bg-[#12121a] border-b border-gray-800/50 px-4 py-3.5">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: 'linear-gradient(135deg, #9333ea, #2563eb)' }}>
             <MessageCircle className="h-4 w-4 text-white" />
@@ -217,8 +212,8 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 bg-[#0a0a0f]">
-        <div className="space-y-0.5">
+      <div className="flex-1 overflow-y-auto px-3 py-4 bg-[#0a0a0f]">
+        <div className="space-y-1">
           {visibleMessages.map((msg, i) => {
             const isOwn = msg.senderId === user.id;
             const prevMsg = visibleMessages[i - 1];
@@ -229,22 +224,22 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
             return (
               <div
                 key={msg.id}
-                className={`relative flex ${isOwn ? 'justify-end' : 'justify-start'} ${!sameSender && i > 0 ? 'mt-3' : 'mt-0.5'}`}
+                className={`relative flex ${isOwn ? 'justify-end' : 'justify-start'} ${!sameSender && i > 0 ? 'mt-3.5' : 'mt-0'}`}
                 onMouseEnter={() => setHoveredMessageId(msg.id)}
                 onMouseLeave={() => setHoveredMessageId(null)}
               >
                 {/* Avatar */}
                 {!isOwn && !sameSender && (
-                  <div className="mr-2 mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                  <div className="mr-2.5 mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
                     style={{ backgroundColor: getAvatarColor(msg.senderId) }}>
                     {getInitials(msg.senderName)}
                   </div>
                 )}
-                {!isOwn && sameSender && <div className="mr-2 w-7 flex-shrink-0" />}
+                {!isOwn && sameSender && <div className="mr-2.5 w-7 flex-shrink-0" />}
 
-                <div className={`max-w-[75%] flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+                <div className={`max-w-[75%] flex flex-col gap-1 ${isOwn ? 'items-end' : 'items-start'}`}>
                   {!isOwn && !sameSender && (
-                    <p className="mb-0.5 text-[11px] font-medium text-purple-400 px-0.5">{msg.senderName}</p>
+                    <p className="text-[11px] font-medium text-purple-400 px-0.5 leading-none">{msg.senderName}</p>
                   )}
 
                   {/* Edit mode */}
@@ -278,11 +273,11 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
                   ) : (
                     /* Message bubble */
                     <div
-                      className={`rounded-2xl px-3 py-1.5 text-sm text-white ${isOwn ? 'rounded-br-md' : 'rounded-bl-md'}`}
+                      className={`rounded-2xl px-3.5 py-2 text-sm text-white ${isOwn ? 'rounded-br-md' : 'rounded-bl-md'}`}
                       style={isOwn ? { background: 'linear-gradient(135deg, #9333ea, #2563eb)' } : { backgroundColor: '#1e1e2e' }}
                     >
                       <LinkifiedText text={msg.content} className="break-words leading-relaxed" />
-                      <p className={`mt-0.5 text-[10px] flex items-center gap-1 ${isOwn ? 'text-purple-200' : 'text-gray-500'}`}>
+                      <p className={`mt-1 text-[10px] flex items-center gap-1 ${isOwn ? 'text-purple-200' : 'text-gray-500'}`}>
                         {formatRelativeTime(msg.createdAt)}
                         {msg.isEdited && <span className="italic">(edited)</span>}
                       </p>
@@ -321,7 +316,7 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSendMessage} className="border-t border-gray-800/50 bg-[#12121a] px-3 py-3">
+      <form onSubmit={handleSendMessage} className="border-t border-gray-800/50 bg-[#12121a] px-3 py-3.5">
         <div className="flex items-center gap-2">
           <input
             value={inputValue}
@@ -329,7 +324,7 @@ export default function GlobalChat({ user, socket, socketReady, setView }) {
             placeholder={rateLimitInfo ? `Wait ${rateLimitInfo.secondsUntilReset}s...` : 'Type a message...'}
             disabled={!socketReady || !!rateLimitInfo}
             maxLength={500}
-            className="flex-1 rounded-full bg-[#1e1e2e] border border-gray-800/50 px-4 py-2 text-sm text-white placeholder:text-gray-500 outline-none focus:border-purple-600/50 transition-colors disabled:opacity-50"
+            className="flex-1 rounded-full bg-[#1e1e2e] border border-gray-800/50 px-4 py-2.5 text-sm text-white placeholder:text-gray-500 outline-none focus:border-purple-600/50 transition-colors disabled:opacity-50"
           />
           <button
             type="submit"
