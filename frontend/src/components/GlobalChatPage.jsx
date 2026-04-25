@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { 
   MessageCircle, 
   Send, 
@@ -35,15 +35,24 @@ export default function GlobalChatPage({ user, socket, socketReady, onlineCount 
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const initialLoadDone = useRef(false);
+  const hasAutoScrolledOnOpen = useRef(false);
   const isLoadingMore = useRef(false);
   const prevScrollHeight = useRef(0);
   const editInputRef = useRef(null);
   const visibleMessages = messages.filter(msg => !msg.isDeleted);
 
   // Auto-scroll to bottom
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior,
+      });
+      return;
+    }
+
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current.scrollIntoView({ behavior });
     }
   }, []);
 
@@ -55,7 +64,7 @@ export default function GlobalChatPage({ user, socket, socketReady, onlineCount 
       if (currentOffset === 0) {
         setMessages(newMessages);
         setIsLoading(false);
-        setTimeout(scrollToBottom, 100);
+        setTimeout(() => scrollToBottom('auto'), 100);
       } else {
         setMessages(prev => [...newMessages, ...prev]);
 
@@ -85,6 +94,18 @@ export default function GlobalChatPage({ user, socket, socketReady, onlineCount 
     setIsLoading(true);
     fetchMessages(0);
   }, [fetchMessages]);
+
+  // Snap to the latest message when the full-page chat first becomes visible.
+  useLayoutEffect(() => {
+    if (isLoading || visibleMessages.length === 0 || hasAutoScrolledOnOpen.current) return;
+
+    hasAutoScrolledOnOpen.current = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToBottom('auto');
+      });
+    });
+  }, [isLoading, visibleMessages.length, scrollToBottom]);
 
   // Focus edit input when editing starts
   useEffect(() => {
@@ -216,6 +237,7 @@ export default function GlobalChatPage({ user, socket, socketReady, onlineCount 
     setMessages([]);
     setOffset(0);
     setIsLoading(true);
+    hasAutoScrolledOnOpen.current = false;
     initialLoadDone.current = false;
     fetchMessages(0);
     initialLoadDone.current = true;
